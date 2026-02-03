@@ -1,0 +1,460 @@
+import { useState, useEffect } from 'react';
+import {
+  Clock,
+  Calendar,
+  Shuffle,
+  Settings,
+  Camera,
+  TrendingUp,
+  Zap,
+  Flame,
+  Award,
+  Crown,
+  Lock,
+  Sparkles
+} from 'lucide-react';
+import { Exercise, UserPreferences, View, SubscriptionPlan } from '../App';
+
+interface DashboardProps {
+  onViewExercise: (exercise: Exercise) => void;
+  onNavigate: (view: View) => void;
+  userPreferences: UserPreferences;
+  subscriptionPlan: SubscriptionPlan;
+  onUpgrade: () => void;
+}
+
+export default function Dashboard({ onViewExercise, onNavigate, userPreferences, subscriptionPlan, onUpgrade }: DashboardProps) {
+  const [selectedDate, setSelectedDate] = useState('today');
+  const [greeting, setGreeting] = useState('');
+  const [exercisesViewedToday, setExercisesViewedToday] = useState(0);
+
+  const isPremium = subscriptionPlan === 'premium';
+  const freeLimit = 3;
+  const remainingFreeExercises = Math.max(0, freeLimit - exercisesViewedToday);
+
+  useEffect(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) setGreeting('Good morning');
+    else if (hour < 18) setGreeting('Good afternoon');
+    else setGreeting('Good evening');
+  }, []);
+
+  const mockExercises: Exercise[] = [
+    {
+      id: '1',
+      title: 'Desk-Side Stretching Sequence',
+      duration: 5,
+      intensity: 'low',
+      equipment: ['None / Bodyweight Only'],
+      instructions: [
+        'Stand behind your chair',
+        'Reach arms overhead for 30 seconds',
+        'Side bends - 10 each side',
+        'Gentle torso twists',
+        'Neck rolls - 5 each direction'
+      ],
+      tips: 'Perfect for between meetings. No changing required.',
+      scheduledTime: '10:30 AM',
+      category: 'Mobility'
+    },
+    {
+      id: '2',
+      title: 'Standing Leg Activators',
+      duration: 7,
+      intensity: 'low',
+      equipment: ['Chair'],
+      instructions: [
+        'Use chair for balance if needed',
+        'Calf raises - 15 reps',
+        'Single leg balance - 30 sec each',
+        'Gentle leg swings - 10 each direction',
+        'Standing glute squeezes - 20 reps'
+      ],
+      tips: 'Great for improving circulation during long work sessions.',
+      scheduledTime: '2:15 PM',
+      category: 'Strength'
+    },
+    {
+      id: '3',
+      title: 'Wall-Assisted Upper Body',
+      duration: 8,
+      intensity: 'medium',
+      equipment: ['Wall Space'],
+      instructions: [
+        'Wall push-ups - 12 reps',
+        'Wall angels - 15 reps',
+        'Wall slides - 10 reps',
+        'Shoulder blade squeezes against wall',
+        'Chest stretch using doorframe'
+      ],
+      tips: 'Builds upper body strength without equipment.',
+      scheduledTime: '4:45 PM',
+      category: 'Strength'
+    }
+  ];
+
+  const handleExerciseClick = (exercise: Exercise) => {
+    if (!isPremium && exercisesViewedToday >= freeLimit) {
+      onUpgrade();
+      return;
+    }
+    setExercisesViewedToday(prev => prev + 1);
+    onViewExercise(exercise);
+  };
+
+  const handleRouletteMode = () => {
+    if (!isPremium && exercisesViewedToday >= freeLimit) {
+      onUpgrade();
+      return;
+    }
+    const randomExercise = mockExercises[Math.floor(Math.random() * mockExercises.length)];
+    setExercisesViewedToday(prev => prev + 1);
+    onViewExercise(randomExercise);
+  };
+
+  const handleSpaceAnalysis = () => {
+    if (!isPremium) {
+      onUpgrade();
+      return;
+    }
+    onNavigate('space-analysis');
+  };
+
+  const currentStreak = 7;
+
+  return (
+    <div className="min-h-screen pb-24 bg-stone-50 smooth-scroll">
+      {/* Header */}
+      <header className="glass-effect border-b border-stone-200 sticky top-0 z-10 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <img
+                src="/kinetic-snacks-logo-horizontal.png"
+                alt="Kinetic Snacks"
+                className="h-8 sm:h-10"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 sm:gap-4">
+              {/* Streak Display */}
+              <div className="flex items-center gap-1.5 sm:gap-2 bg-orange-50 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-full border border-orange-200">
+                <Flame className="w-4 h-4 sm:w-5 sm:h-5 text-orange-600" />
+                <span className="font-bold text-orange-900 text-sm sm:text-base">{currentStreak}</span>
+                <span className="text-xs sm:text-sm text-orange-700 hidden sm:inline">day streak</span>
+              </div>
+
+              <button
+                onClick={() => onNavigate('space-analysis')}
+                className="touch-target p-2.5 sm:p-2 hover:bg-stone-100 rounded-lg transition-smooth active:scale-95"
+                title="Space Analysis"
+              >
+                <Camera className="w-5 h-5 text-slate-600" />
+              </button>
+              <button
+                onClick={() => onNavigate('settings')}
+                className="touch-target p-2.5 sm:p-2 hover:bg-stone-100 rounded-lg transition-smooth active:scale-95"
+                title="Settings"
+              >
+                <Settings className="w-5 h-5 text-slate-600" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        {/* Greeting Section */}
+        <div className="mb-6 sm:mb-8 animate-slide-up">
+          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-slate-900 mb-2">
+            {greeting}
+          </h1>
+          <p className="text-slate-600 text-base sm:text-lg">
+            Ready to keep your {currentStreak}-day streak alive?
+          </p>
+        </div>
+
+        {/* Premium Upgrade Banner */}
+        {!isPremium && (
+          <div className="mb-6 sm:mb-8 animate-scale-in">
+            <div className="bg-gradient-to-r from-orange-500 to-orange-600 rounded-2xl sm:rounded-3xl p-5 sm:p-6 shadow-xl border-2 border-orange-400 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-8 translate-x-8"></div>
+              <div className="absolute bottom-0 left-0 w-24 h-24 bg-white/10 rounded-full translate-y-8 -translate-x-8"></div>
+              <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Crown className="w-6 h-6 text-white" />
+                    <h3 className="text-xl sm:text-2xl font-bold text-white">Upgrade to Premium</h3>
+                  </div>
+                  <p className="text-white/95 text-sm sm:text-base mb-3">
+                    {remainingFreeExercises > 0
+                      ? `${remainingFreeExercises} of ${freeLimit} free exercises remaining today. Get unlimited access!`
+                      : `You've reached your daily limit. Upgrade for unlimited exercises!`
+                    }
+                  </p>
+                  <ul className="space-y-1.5">
+                    {['Unlimited exercises', 'Space analysis', 'Custom plans', 'Progress tracking'].map((feature, idx) => (
+                      <li key={idx} className="flex items-center gap-2 text-white/95 text-xs sm:text-sm">
+                        <Sparkles className="w-4 h-4 flex-shrink-0" />
+                        {feature}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <button
+                  onClick={onUpgrade}
+                  className="touch-target w-full sm:w-auto bg-white hover:bg-orange-50 active:scale-95 text-orange-600 font-bold px-6 py-3 rounded-xl transition-all shadow-lg hover:shadow-xl whitespace-nowrap"
+                >
+                  Start Free Trial
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Stats Cards */}
+        <div className="grid grid-cols-3 gap-3 sm:gap-4 mb-6 sm:mb-8">
+          <StatCard
+            icon={<Zap className="w-5 h-5" />}
+            label="Today's Snacks"
+            value="3"
+            subValue="of 3 completed"
+            color="bg-orange-500"
+            delay="0s"
+          />
+          <StatCard
+            icon={<Clock className="w-5 h-5" />}
+            label="Total Time"
+            value="20 min"
+            subValue="this week"
+            color="bg-orange-500"
+            delay="0.1s"
+          />
+          <StatCard
+            icon={<Award className="w-5 h-5" />}
+            label="Weekly Goal"
+            value="85%"
+            subValue="12 of 14 snacks"
+            color="bg-orange-500"
+            delay="0.2s"
+          />
+        </div>
+
+        {/* Quick Actions */}
+        <div className="grid sm:grid-cols-2 gap-3 sm:gap-4 mb-6 sm:mb-8">
+          <button
+            onClick={handleRouletteMode}
+            className="touch-target group relative overflow-hidden bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 active:scale-95 text-white rounded-2xl p-5 sm:p-6 transition-smooth hover:scale-[1.02] hover:-translate-y-1 shadow-lg hover:shadow-xl text-left"
+          >
+            <div className="relative flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="bg-white/20 p-1.5 sm:p-2 rounded-lg group-hover:scale-110 transition-smooth">
+                    <Shuffle className="w-5 h-5 sm:w-6 sm:h-6" />
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-bold">Surprise Me</h3>
+                </div>
+                <p className="text-white/95 text-xs sm:text-sm">
+                  Get a random snack right now
+                </p>
+              </div>
+              <div className="text-3xl sm:text-4xl opacity-50 group-hover:opacity-75 transition-smooth">
+                🎲
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={handleSpaceAnalysis}
+            className="touch-target group relative bg-white border-2 border-stone-200 hover:border-orange-400 hover:bg-orange-50 active:scale-95 text-slate-900 rounded-2xl p-5 sm:p-6 transition-smooth hover:scale-[1.02] hover:-translate-y-1 shadow-sm hover:shadow-lg text-left"
+          >
+            {!isPremium && (
+              <div className="absolute top-3 right-3 bg-orange-600 text-white p-1.5 rounded-lg shadow-md">
+                <Lock className="w-4 h-4" />
+              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="bg-orange-100 p-1.5 sm:p-2 rounded-lg group-hover:scale-110 transition-smooth">
+                    <Camera className="w-5 h-5 sm:w-6 sm:h-6 text-orange-600" />
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-bold flex items-center gap-2">
+                    Analyze Space
+                    {!isPremium && <span className="text-xs font-semibold text-orange-600">PREMIUM</span>}
+                  </h3>
+                </div>
+                <p className="text-slate-600 text-xs sm:text-sm">
+                  AI-powered room optimization
+                </p>
+              </div>
+              <div className="text-3xl sm:text-4xl opacity-30 group-hover:opacity-50 transition-smooth">
+                📸
+              </div>
+            </div>
+          </button>
+        </div>
+
+        {/* Date Filter */}
+        <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
+          {['today', 'tomorrow', 'this-week'].map((period) => (
+            <button
+              key={period}
+              onClick={() => setSelectedDate(period)}
+              className={`px-4 py-2 rounded-full font-medium transition-all whitespace-nowrap ${
+                selectedDate === period
+                  ? 'bg-orange-600 text-white shadow-md'
+                  : 'bg-white text-slate-600 hover:bg-orange-50 border border-stone-200 hover:border-orange-300'
+              }`}
+            >
+              {period === 'today' && 'Today'}
+              {period === 'tomorrow' && 'Tomorrow'}
+              {period === 'this-week' && 'This Week'}
+            </button>
+          ))}
+        </div>
+
+        {/* Scheduled Exercises */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-slate-900">
+              Today's Movement Timeline
+            </h2>
+            <span className="text-sm text-slate-500 font-medium">
+              {mockExercises.length} snacks scheduled
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            {mockExercises.map((exercise, index) => {
+              const isLocked = !isPremium && index >= freeLimit;
+              return (
+                <ExerciseCard
+                  key={exercise.id}
+                  exercise={exercise}
+                  onClick={() => isLocked ? onUpgrade() : handleExerciseClick(exercise)}
+                  index={index}
+                  isLocked={isLocked}
+                />
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Empty State Message */}
+        <div className="mt-8 bg-white rounded-2xl p-8 text-center border border-stone-200 shadow-sm">
+          <Calendar className="w-12 h-12 text-slate-400 mx-auto mb-3" />
+          <h3 className="text-lg font-semibold text-slate-900 mb-2">
+            AI Scheduling Coming Soon
+          </h3>
+          <p className="text-slate-600 text-sm">
+            Connect your calendar to automatically schedule kinetic snacks in your free time
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface StatCardProps {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  subValue: string;
+  color: string;
+  delay: string;
+}
+
+function StatCard({ icon, label, value, subValue, color, delay }: StatCardProps) {
+  return (
+    <div
+      className="group bg-white rounded-xl sm:rounded-2xl p-3 sm:p-5 shadow-sm hover:shadow-lg border border-stone-100 hover:border-orange-200 transition-smooth hover:-translate-y-1 animate-scale-in"
+      style={{ animationDelay: delay }}
+    >
+      <div className="flex items-start justify-between mb-2 sm:mb-3">
+        <div className={`${color} w-10 h-10 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-smooth`}>
+          {icon}
+        </div>
+      </div>
+      <p className="text-[10px] sm:text-xs text-slate-500 font-medium uppercase tracking-wide mb-1">{label}</p>
+      <p className="text-xl sm:text-3xl font-bold text-slate-900 mb-0.5 sm:mb-1">{value}</p>
+      <p className="text-xs sm:text-sm text-slate-600 leading-tight">{subValue}</p>
+    </div>
+  );
+}
+
+interface ExerciseCardProps {
+  exercise: Exercise;
+  onClick: () => void;
+  index: number;
+  isLocked?: boolean;
+}
+
+function ExerciseCard({ exercise, onClick, index, isLocked }: ExerciseCardProps) {
+  return (
+    <button
+      onClick={onClick}
+      className={`touch-target group relative w-full bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-sm hover:shadow-lg active:scale-[0.98] transition-smooth text-left border-2 hover:-translate-y-1 animate-slide-up ${
+        isLocked
+          ? 'border-stone-200 opacity-75'
+          : 'border-stone-100 hover:border-orange-400'
+      }`}
+      style={{ animationDelay: `${index * 0.1}s` }}
+    >
+      {isLocked && (
+        <>
+          <div className="absolute inset-0 bg-stone-100/80 backdrop-blur-sm rounded-xl sm:rounded-2xl z-10"></div>
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center gap-2">
+            <div className="w-12 h-12 sm:w-16 sm:h-16 bg-orange-600 rounded-full flex items-center justify-center shadow-xl">
+              <Lock className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
+            </div>
+            <span className="text-sm sm:text-base font-bold text-slate-900 bg-white px-4 py-2 rounded-full shadow-lg">
+              Premium Only
+            </span>
+          </div>
+        </>
+      )}
+      <div className="flex items-start justify-between mb-3 sm:mb-4">
+        <div className="flex-1">
+          {exercise.scheduledTime && (
+            <div className="inline-flex items-center gap-1.5 sm:gap-2 bg-orange-50 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full mb-2 sm:mb-3 border border-orange-200">
+              <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-orange-600" />
+              <span className="text-xs sm:text-sm font-bold text-orange-900">
+                {exercise.scheduledTime}
+              </span>
+            </div>
+          )}
+
+          <h3 className={`text-lg sm:text-xl font-bold text-slate-900 mb-2 sm:mb-3 transition-smooth leading-snug ${!isLocked && 'group-hover:text-orange-600'}`}>
+            {exercise.title}
+          </h3>
+
+          <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-slate-600 flex-wrap mb-2 sm:mb-3">
+            <span className="flex items-center gap-1 font-medium">
+              <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              {exercise.duration} min
+            </span>
+            <span className="px-2 sm:px-3 py-0.5 sm:py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-bold">
+              {exercise.category}
+            </span>
+            <span className={`px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-xs font-bold ${
+              exercise.intensity === 'low'
+                ? 'bg-emerald-100 text-emerald-700'
+                : 'bg-amber-100 text-amber-700'
+            }`}>
+              {exercise.intensity}
+            </span>
+          </div>
+
+          <p className="text-xs sm:text-sm text-slate-600 leading-relaxed line-clamp-2 sm:line-clamp-none">
+            {exercise.tips}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center text-xs sm:text-sm font-semibold text-orange-600 group-hover:text-orange-700">
+        Start Exercise →
+      </div>
+    </button>
+  );
+}
