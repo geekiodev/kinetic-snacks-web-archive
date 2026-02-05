@@ -5,13 +5,16 @@ import { useState, useEffect } from 'react';
 interface ExerciseDetailProps {
   exercise: Exercise;
   onBack: () => void;
+  onComplete?: (exercise: Exercise) => Promise<void>;
 }
 
-export default function ExerciseDetail({ exercise, onBack }: ExerciseDetailProps) {
+export default function ExerciseDetail({ exercise, onBack, onComplete }: ExerciseDetailProps) {
   const [isStarted, setIsStarted] = useState(false);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
   const [showCelebration, setShowCelebration] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(exercise.duration * 60);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   const toggleStep = (index: number) => {
     setCompletedSteps(prev =>
@@ -47,7 +50,18 @@ export default function ExerciseDetail({ exercise, onBack }: ExerciseDetailProps
     };
   }, [isStarted, timeRemaining]);
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
+    setSaveError('');
+    if (onComplete) {
+      setIsSaving(true);
+      try {
+        await onComplete(exercise);
+      } catch (error) {
+        setSaveError(error instanceof Error ? error.message : 'Unable to save your progress.');
+      } finally {
+        setIsSaving(false);
+      }
+    }
     setShowCelebration(true);
     setTimeout(() => {
       onBack();
@@ -354,9 +368,16 @@ export default function ExerciseDetail({ exercise, onBack }: ExerciseDetailProps
                   }`}
                 >
                   <Trophy className="w-5 h-5 sm:w-6 sm:h-6" />
-                  <span className="text-base sm:text-lg">Complete Snack</span>
+                  <span className="text-base sm:text-lg">
+                    {isSaving ? 'Saving...' : 'Complete Snack'}
+                  </span>
                 </button>
               </div>
+            )}
+            {saveError && (
+              <p className="text-sm text-red-600 text-center mt-3">
+                {saveError}
+              </p>
             )}
           </div>
         </div>

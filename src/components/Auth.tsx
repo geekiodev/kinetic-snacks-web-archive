@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Mail, Lock, User, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 interface AuthProps {
-  onAuthSuccess: (user: { name: string; email: string }) => void;
+  onAuthSuccess: (user: { id: string; name: string; email: string }) => void;
 }
 
 export default function Auth({ onAuthSuccess }: AuthProps) {
@@ -18,14 +19,24 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
     password: '',
     name: '',
   });
+  const [authError, setAuthError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
   const validateEmail = (email: string) => {
     const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return re.test(email);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAuthError('');
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      setAuthError('Missing Supabase environment variables. Check VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+      return;
+    }
 
     const newErrors = {
       email: '',
@@ -52,11 +63,74 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
     setErrors(newErrors);
 
     if (!newErrors.email && !newErrors.password && (!newErrors.name || mode === 'login')) {
-      // Frontend only - simulate successful auth
-      onAuthSuccess({
-        name: formData.name || formData.email.split('@')[0],
-        email: formData.email,
-      });
+      setIsSubmitting(true);
+      try {
+        const withTimeout = async <T,>(promise: Promise<T>) => {
+          let timeoutId: ReturnType<typeof setTimeout> | null = null;
+          const timeout = new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => {
+              reject(new Error('Auth request timed out. Check your Supabase connection.'));
+            }, 8000);
+          });
+
+          try {
+            return await Promise.race([promise, timeout]);
+          } finally {
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+            }
+          }
+        };
+
+        if (mode === 'signup') {
+          const { data, error } = await withTimeout(supabase.auth.signUp({
+            email: formData.email,
+            password: formData.password,
+            options: { data: { name: formData.name } },
+          }));
+
+          if (error) {
+            setAuthError(error.message);
+            return;
+          }
+
+          if (!data.session) {
+            setAuthError('Check your email to confirm your account.');
+            return;
+          }
+
+          if (data.user?.email) {
+            onAuthSuccess({
+              id: data.user.id,
+              name: formData.name || data.user.email.split('@')[0],
+              email: data.user.email,
+            });
+          }
+          return;
+        }
+
+        const { data, error } = await withTimeout(supabase.auth.signInWithPassword({
+          email: formData.email,
+          password: formData.password,
+        }));
+
+        if (error) {
+          setAuthError(error.message);
+          return;
+        }
+
+        if (data.user?.email) {
+          onAuthSuccess({
+            id: data.user.id,
+            name: data.user.user_metadata?.name || data.user.email.split('@')[0],
+            email: data.user.email,
+          });
+        }
+      } catch (error) {
+        setAuthError(error instanceof Error ? error.message : 'Authentication failed.');
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -217,11 +291,15 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
 
             <button
               type="submit"
-              className="touch-target group w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-smooth hover:shadow-xl shadow-lg flex items-center justify-center gap-2"
+              disabled={isSubmitting}
+              className="touch-target group w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 active:scale-95 text-white font-bold py-3.5 rounded-xl transition-smooth hover:shadow-xl shadow-lg flex items-center justify-center gap-2 disabled:from-slate-400 disabled:to-slate-500"
             >
-              {mode === 'login' ? 'Sign In' : 'Create Account'}
+              {isSubmitting ? 'Working...' : mode === 'login' ? 'Sign In' : 'Create Account'}
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </button>
+            {authError && (
+              <p className="text-sm text-red-600 text-center">{authError}</p>
+            )}
           </form>
 
           {/* Divider */}

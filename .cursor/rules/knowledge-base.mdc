@@ -1,0 +1,12 @@
+---
+description: Knowledge base maintenance rules
+alwaysApply: true
+---
+
+# Knowledge Base Maintenance
+
+- This project uses a living knowledge base in `KNOWLEDGE_BASE.md`.
+- Update the knowledge base after every significant change (features, bugs, decisions, experiments, UX changes).
+- Before any commit/PR, complete `KNOWLEDGE_BASE_UPDATE_CHECKLIST.md`.
+- Keep `KNOWLEDGE_BASE.md` under ~500 lines; archive to `KNOWLEDGE_BASE_ARCHIVE.md` when needed.
+- Update `KNOWLEDGE_BASE_QUICK_REF.md` when adding new patterns or fixes.

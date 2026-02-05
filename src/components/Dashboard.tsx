@@ -14,19 +14,25 @@ import {
   Sparkles
 } from 'lucide-react';
 import { Exercise, UserPreferences, View, SubscriptionPlan } from '../App';
+import { supabase } from '../lib/supabase';
 
 interface DashboardProps {
   onViewExercise: (exercise: Exercise) => void;
   onNavigate: (view: View) => void;
+  userId: string | null;
   userPreferences: UserPreferences;
   subscriptionPlan: SubscriptionPlan;
   onUpgrade: () => void;
 }
 
-export default function Dashboard({ onViewExercise, onNavigate, userPreferences, subscriptionPlan, onUpgrade }: DashboardProps) {
+export default function Dashboard({ onViewExercise, onNavigate, userId, userPreferences, subscriptionPlan, onUpgrade }: DashboardProps) {
   const [selectedDate, setSelectedDate] = useState('today');
   const [greeting, setGreeting] = useState('');
   const [exercisesViewedToday, setExercisesViewedToday] = useState(0);
+  const [currentStreak, setCurrentStreak] = useState(0);
+  const [todayCount, setTodayCount] = useState(0);
+  const [weeklyCount, setWeeklyCount] = useState(0);
+  const [weeklyMinutes, setWeeklyMinutes] = useState(0);
 
   const isPremium = subscriptionPlan === 'premium';
   const freeLimit = 3;
@@ -38,6 +44,76 @@ export default function Dashboard({ onViewExercise, onNavigate, userPreferences,
     else if (hour < 18) setGreeting('Good afternoon');
     else setGreeting('Good evening');
   }, []);
+
+  useEffect(() => {
+    const loadStats = async () => {
+      if (!userId) {
+        setCurrentStreak(0);
+        setTodayCount(0);
+        setWeeklyCount(0);
+        setWeeklyMinutes(0);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('exercise_completions')
+        .select('completed_at, duration_minutes')
+        .eq('user_id', userId)
+        .gte('completed_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+
+      if (error || !data) {
+        setCurrentStreak(0);
+        setTodayCount(0);
+        setWeeklyCount(0);
+        setWeeklyMinutes(0);
+        return;
+      }
+
+      const toDateKey = (value: string) => {
+        const date = new Date(value);
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      };
+
+      const todayKey = toDateKey(new Date().toISOString());
+      const weekStart = new Date();
+      weekStart.setHours(0, 0, 0, 0);
+      weekStart.setDate(weekStart.getDate() - 6);
+      const weekStartKey = toDateKey(weekStart.toISOString());
+
+      const dayCounts = new Map<string, number>();
+      let weeklyTotal = 0;
+      let weeklyDuration = 0;
+
+      for (const entry of data) {
+        const key = toDateKey(entry.completed_at);
+        dayCounts.set(key, (dayCounts.get(key) || 0) + 1);
+        if (key >= weekStartKey) {
+          weeklyTotal += 1;
+          weeklyDuration += entry.duration_minutes;
+        }
+      }
+
+      setTodayCount(dayCounts.get(todayKey) || 0);
+      setWeeklyCount(weeklyTotal);
+      setWeeklyMinutes(weeklyDuration);
+
+      let streak = 0;
+      const cursor = new Date();
+      cursor.setHours(0, 0, 0, 0);
+      while (true) {
+        const key = toDateKey(cursor.toISOString());
+        if (dayCounts.get(key)) {
+          streak += 1;
+          cursor.setDate(cursor.getDate() - 1);
+        } else {
+          break;
+        }
+      }
+      setCurrentStreak(streak);
+    };
+
+    loadStats();
+  }, [userId]);
 
   const mockExercises: Exercise[] = [
     {
@@ -120,7 +196,8 @@ export default function Dashboard({ onViewExercise, onNavigate, userPreferences,
     onNavigate('space-analysis');
   };
 
-  const currentStreak = 7;
+  const weeklyGoal = 14;
+  const weeklyPercent = Math.min(100, Math.round((weeklyCount / weeklyGoal) * 100));
 
   return (
     <div className="min-h-screen pb-24 bg-stone-50 smooth-scroll">
@@ -214,27 +291,27 @@ export default function Dashboard({ onViewExercise, onNavigate, userPreferences,
 
         {/* Stats Cards */}
         <div className="grid grid-cols-3 gap-3 sm:gap-4 mb-6 sm:mb-8">
-          <StatCard
+            <StatCard
             icon={<Zap className="w-5 h-5" />}
             label="Today's Snacks"
-            value="3"
-            subValue="of 3 completed"
+              value={`${todayCount}`}
+              subValue={`${todayCount} completed`}
             color="bg-orange-500"
             delay="0s"
           />
           <StatCard
             icon={<Clock className="w-5 h-5" />}
             label="Total Time"
-            value="20 min"
-            subValue="this week"
+              value={`${weeklyMinutes} min`}
+              subValue="this week"
             color="bg-orange-500"
             delay="0.1s"
           />
           <StatCard
             icon={<Award className="w-5 h-5" />}
             label="Weekly Goal"
-            value="85%"
-            subValue="12 of 14 snacks"
+              value={`${weeklyPercent}%`}
+              subValue={`${weeklyCount} of ${weeklyGoal} snacks`}
             color="bg-orange-500"
             delay="0.2s"
           />
