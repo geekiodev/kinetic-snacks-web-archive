@@ -143,6 +143,47 @@ on public.exercise_completions for delete
 to authenticated
 using (auth.uid() = user_id);
 
+-- Limitation rules
+create table if not exists public.limitation_rules (
+  id uuid primary key default gen_random_uuid(),
+  limitation_key text not null,
+  keywords text[] not null default '{}',
+  is_active boolean not null default true,
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now()
+);
+
+alter table public.limitation_rules enable row level security;
+
+create policy "limitation_rules_select_all"
+on public.limitation_rules for select
+to authenticated
+using (true);
+
+create policy "limitation_rules_admin_insert"
+on public.limitation_rules for insert
+to authenticated
+with check (exists (
+  select 1 from public.profiles
+  where profiles.id = auth.uid() and profiles.is_admin = true
+));
+
+create policy "limitation_rules_admin_update"
+on public.limitation_rules for update
+to authenticated
+using (exists (
+  select 1 from public.profiles
+  where profiles.id = auth.uid() and profiles.is_admin = true
+));
+
+create policy "limitation_rules_admin_delete"
+on public.limitation_rules for delete
+to authenticated
+using (exists (
+  select 1 from public.profiles
+  where profiles.id = auth.uid() and profiles.is_admin = true
+));
+
 -- Space analysis results (optional)
 create table if not exists public.space_analyses (
   id uuid primary key default gen_random_uuid(),

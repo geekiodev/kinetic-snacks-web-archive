@@ -15,8 +15,8 @@ import {
 } from 'lucide-react';
 import { Exercise, UserPreferences, View, SubscriptionPlan } from '../App';
 import { supabase } from '../lib/supabase';
-import { validateExerciseCandidate } from '../lib/exerciseValidation';
-import { generateExercises } from '../lib/exerciseGenerator';
+import { loadLimitationRules, validateExerciseCandidate } from '../lib/exerciseValidation';
+import { generateExercises, rankExercises } from '../lib/exerciseGenerator';
 
 interface DashboardProps {
   onViewExercise: (exercise: Exercise) => void;
@@ -145,22 +145,41 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
           category: row.category ?? 'General',
         })) as Exercise[];
 
-        const filtered = mapped.filter((exercise) => validateExerciseCandidate(exercise, userPreferences).valid);
+        const limitationRules = await loadLimitationRules();
+        const filtered = mapped.filter((exercise) =>
+          validateExerciseCandidate(exercise, userPreferences, limitationRules).valid
+        );
+        const ranked = rankExercises({ preferences: userPreferences, exercises: filtered });
 
         const minCount = 3;
-        if (filtered.length < minCount) {
+        if (ranked.length < minCount) {
           const generated = await generateExercises({
             preferences: userPreferences,
-            count: minCount - filtered.length,
+            count: minCount - ranked.length,
           });
-          const validatedGenerated = generated.filter(
-            (exercise) => validateExerciseCandidate(exercise, userPreferences).valid
+          const validatedGenerated = generated.filter((exercise) =>
+            validateExerciseCandidate(exercise, userPreferences, limitationRules).valid
           );
-          setExercises([...filtered, ...validatedGenerated]);
+          const persistGenerated = false;
+          if (persistGenerated && validatedGenerated.length > 0) {
+            void supabase.from('exercises').insert(
+              validatedGenerated.map((exercise) => ({
+                title: exercise.title,
+                duration_minutes: exercise.duration,
+                intensity: exercise.intensity,
+                equipment: exercise.equipment,
+                instructions: exercise.instructions,
+                tips: exercise.tips,
+                category: exercise.category,
+                is_active: false,
+              }))
+            );
+          }
+          setExercises(rankExercises({ preferences: userPreferences, exercises: [...ranked, ...validatedGenerated] }));
           return;
         }
 
-        setExercises(filtered);
+        setExercises(ranked);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unable to load exercises.';
         setExerciseError(message);

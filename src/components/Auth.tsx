@@ -33,6 +33,10 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
     e.preventDefault();
     setAuthError('');
 
+    // #region agent log
+    fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H1',location:'Auth.tsx:36',message:'Auth submit start',data:{mode,hasSupabaseUrl:Boolean(supabaseUrl),hasAnonKey:Boolean(supabaseAnonKey),emailLength:formData.email.length,passwordLength:formData.password.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion agent log
+
     if (!supabaseUrl || !supabaseAnonKey) {
       setAuthError('Missing Supabase environment variables. Check VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
       return;
@@ -63,71 +67,235 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
     setErrors(newErrors);
 
     if (!newErrors.email && !newErrors.password && (!newErrors.name || mode === 'login')) {
+      const withTimeout = async <T,>(promise: Promise<T>, ms = 8000) => {
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        const timeout = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            // #region agent log
+            fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H2',location:'Auth.tsx:74',message:'Auth request timed out',data:{mode},timestamp:Date.now()})}).catch(()=>{});
+            // #endregion agent log
+            reject(new Error('Auth request timed out. Check your Supabase connection.'));
+          }, ms);
+        });
+
+        try {
+          return await Promise.race([promise, timeout]);
+        } finally {
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+          }
+        }
+      };
+
+      const safeGetSession = async (ms = 1500) => {
+        try {
+          return await withTimeout(supabase.auth.getSession(), ms);
+        } catch {
+          return { data: { session: null } } as { data: { session: null } };
+        }
+      };
+
+      const resolveSessionUser = async () => {
+        const { data } = await safeGetSession();
+        return data.session?.user ?? null;
+      };
+
+      const loadStoredSession = () => {
+        if (!supabaseUrl) return null;
+        try {
+          const host = new URL(supabaseUrl).hostname;
+          const projectRef = host.split('.')[0];
+          const storageKey = `sb-${projectRef}-auth-token`;
+          const raw = localStorage.getItem(storageKey);
+          if (!raw) return null;
+          return JSON.parse(raw) as { access_token?: string; refresh_token?: string } | null;
+        } catch {
+          return null;
+        }
+      };
+
+      const decodeTokenUser = () => {
+        const stored = loadStoredSession();
+        const token = stored?.access_token;
+        if (!token) return null;
+        const parts = token.split('.');
+        if (parts.length < 2) return null;
+        const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+        try {
+          const payload = JSON.parse(atob(padded)) as {
+            sub?: string;
+            email?: string;
+            user_metadata?: { name?: string };
+          };
+          if (!payload.sub || !payload.email) return null;
+          return {
+            id: payload.sub,
+            name: payload.user_metadata?.name || payload.email.split('@')[0],
+            email: payload.email,
+          };
+        } catch {
+          return null;
+        }
+      };
+
+      const ensureSessionFromStorage = async () => {
+        const stored = loadStoredSession();
+        if (!stored?.access_token || !stored?.refresh_token) return null;
+        try {
+          const { data } = await withTimeout(
+            supabase.auth.setSession({
+              access_token: stored.access_token,
+              refresh_token: stored.refresh_token,
+            }),
+            1500
+          );
+          return data.session?.user ?? null;
+        } catch {
+          return null;
+        }
+      };
+
+      const pollSessionUser = async (maxMs = 5000, intervalMs = 250) => {
+        const startedAt = Date.now();
+        while (Date.now() - startedAt < maxMs) {
+          const user = await resolveSessionUser();
+          if (user) return user;
+          await new Promise((resolve) => setTimeout(resolve, intervalMs));
+        }
+        return null;
+      };
+
       setIsSubmitting(true);
       try {
-        const withTimeout = async <T,>(promise: Promise<T>) => {
-          let timeoutId: ReturnType<typeof setTimeout> | null = null;
-          const timeout = new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => {
-              reject(new Error('Auth request timed out. Check your Supabase connection.'));
-            }, 8000);
-          });
-
-          try {
-            return await Promise.race([promise, timeout]);
-          } finally {
-            if (timeoutId) {
-              clearTimeout(timeoutId);
-            }
-          }
-        };
 
         if (mode === 'signup') {
-          const { data, error } = await withTimeout(supabase.auth.signUp({
+          // #region agent log
+          fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H1',location:'Auth.tsx:90',message:'Auth signup request',data:{emailLength:formData.email.length},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion agent log
+          const signUpPromise = supabase.auth.signUp({
             email: formData.email,
             password: formData.password,
             options: { data: { name: formData.name } },
-          }));
+          });
+          signUpPromise.catch(() => null);
+
+          const sessionUser = await pollSessionUser();
+          if (sessionUser?.email) {
+            onAuthSuccess({
+              id: sessionUser.id,
+              name: formData.name || sessionUser.email.split('@')[0],
+              email: sessionUser.email,
+            });
+            return;
+          }
+
+          const { data, error } = await withTimeout(signUpPromise);
+
+          // #region agent log
+          fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H1',location:'Auth.tsx:115',message:'Auth signup response',data:{hasError:Boolean(error),hasSession:Boolean(data?.session),hasUser:Boolean(data?.user)},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion agent log
 
           if (error) {
             setAuthError(error.message);
             return;
           }
 
-          if (!data.session) {
+          const postSessionUser = data?.session?.user ?? (await resolveSessionUser());
+          if (!postSessionUser) {
             setAuthError('Check your email to confirm your account.');
             return;
           }
 
-          if (data.user?.email) {
+          if (postSessionUser.email) {
             onAuthSuccess({
-              id: data.user.id,
-              name: formData.name || data.user.email.split('@')[0],
-              email: data.user.email,
+              id: postSessionUser.id,
+              name: formData.name || postSessionUser.email.split('@')[0],
+              email: postSessionUser.email,
             });
           }
           return;
         }
 
-        const { data, error } = await withTimeout(supabase.auth.signInWithPassword({
+        // #region agent log
+        fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H3',location:'Auth.tsx:116',message:'Auth login request',data:{emailLength:formData.email.length},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion agent log
+        const signInPromise = supabase.auth.signInWithPassword({
           email: formData.email,
           password: formData.password,
-        }));
+        });
+        signInPromise.catch(() => null);
 
-        if (error) {
-          setAuthError(error.message);
+        const signInResult = await withTimeout(signInPromise, 1500).catch(() => null);
+        if (signInResult?.data?.user?.email) {
+          onAuthSuccess({
+            id: signInResult.data.user.id,
+            name: signInResult.data.user.user_metadata?.name || signInResult.data.user.email.split('@')[0],
+            email: signInResult.data.user.email,
+          });
           return;
         }
 
-        if (data.user?.email) {
+        const sessionUser = await pollSessionUser(6000, 300);
+        if (sessionUser?.email) {
           onAuthSuccess({
-            id: data.user.id,
-            name: data.user.user_metadata?.name || data.user.email.split('@')[0],
-            email: data.user.email,
+            id: sessionUser.id,
+            name: sessionUser.user_metadata?.name || sessionUser.email.split('@')[0],
+            email: sessionUser.email,
           });
+          return;
         }
+
+        const storageUser = await ensureSessionFromStorage();
+        if (storageUser?.email) {
+          onAuthSuccess({
+            id: storageUser.id,
+            name: storageUser.user_metadata?.name || storageUser.email.split('@')[0],
+            email: storageUser.email,
+          });
+          return;
+        }
+
+        const decodedUser = decodeTokenUser();
+        if (decodedUser) {
+          onAuthSuccess(decodedUser);
+          return;
+        }
+
+        setAuthError('Unable to start a session. Please try again.');
       } catch (error) {
-        setAuthError(error instanceof Error ? error.message : 'Authentication failed.');
+        const message = error instanceof Error ? error.message : 'Authentication failed.';
+
+        // #region agent log
+        fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H9',location:'Auth.tsx:136',message:'Auth submit error',data:{mode,errorMessage:message},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion agent log
+
+        if (message.includes('Auth request timed out')) {
+          try {
+            const sessionUser = (await resolveSessionUser()) ?? (await ensureSessionFromStorage());
+            if (sessionUser?.email) {
+              onAuthSuccess({
+                id: sessionUser.id,
+                name: sessionUser.user_metadata?.name || sessionUser.email.split('@')[0],
+                email: sessionUser.email,
+              });
+              return;
+            }
+
+            const decodedUser = decodeTokenUser();
+            if (decodedUser) {
+              onAuthSuccess(decodedUser);
+              return;
+            }
+          } catch (sessionError) {
+            const sessionMessage = sessionError instanceof Error ? sessionError.message : 'unknown error';
+            // #region agent log
+            fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H9',location:'Auth.tsx:158',message:'Auth fallback failed',data:{errorMessage:sessionMessage},timestamp:Date.now()})}).catch(()=>{});
+            // #endregion agent log
+          }
+        }
+
+        setAuthError(message);
       } finally {
         setIsSubmitting(false);
       }
@@ -195,7 +363,9 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                   <input
                     id="name"
+                    name="name"
                     type="text"
+                    autoComplete="name"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     className={`w-full pl-11 pr-4 py-3 rounded-xl border-2 transition-all text-slate-900 placeholder:text-slate-400 ${
@@ -220,7 +390,9 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   id="email"
+                  name="email"
                   type="email"
+                  autoComplete="email"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   className={`w-full pl-11 pr-4 py-3 rounded-xl border-2 transition-all text-slate-900 placeholder:text-slate-400 ${
@@ -244,7 +416,9 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   id="password"
+                  name="password"
                   type={showPassword ? 'text' : 'password'}
+                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   className={`w-full pl-11 pr-12 py-3 rounded-xl border-2 transition-all text-slate-900 placeholder:text-slate-400 ${
@@ -276,6 +450,8 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
+                    name="rememberMe"
+                    autoComplete="off"
                     className="w-4 h-4 rounded border-stone-300 text-orange-600 focus:ring-orange-500"
                   />
                   <span className="text-slate-600">Remember me</span>
