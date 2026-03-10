@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Auth from '../Auth';
 import { supabase } from '../../lib/supabase';
@@ -11,6 +11,9 @@ vi.mock('../../lib/supabase', () => ({
       signInWithPassword: vi.fn(),
       signUp: vi.fn(),
       setSession: vi.fn(),
+      onAuthStateChange: vi.fn(() => ({
+        data: { subscription: { unsubscribe: vi.fn() } },
+      })),
     },
   },
 }));
@@ -19,6 +22,10 @@ describe('Auth', () => {
   beforeEach(() => {
     vi.stubEnv('VITE_SUPABASE_URL', 'https://example.supabase.co');
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'test-key');
+    Object.assign(import.meta.env, {
+      VITE_SUPABASE_URL: 'https://example.supabase.co',
+      VITE_SUPABASE_ANON_KEY: 'test-key',
+    });
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true })) as unknown as typeof fetch);
   });
 
@@ -72,11 +79,13 @@ describe('Auth', () => {
     }
     await userEvent.click(submit);
 
-    expect(onAuthSuccess).toHaveBeenCalledWith({
-      id: 'user-1',
-      name: 'User',
-      email: 'user@example.com',
-    });
+    await waitFor(() => {
+      expect(onAuthSuccess).toHaveBeenCalledWith({
+        id: 'user-1',
+        name: 'User',
+        email: 'user@example.com',
+      });
+    }, { timeout: 5000 });
   });
 
   it('recovers from timeout when a session becomes available', async () => {
@@ -115,11 +124,13 @@ describe('Auth', () => {
 
     await userEvent.click(submit);
 
-    expect(onAuthSuccess).toHaveBeenCalledWith({
-      id: 'user-2',
-      name: 'Timeout User',
-      email: 'timeout@example.com',
-    });
+    await waitFor(() => {
+      expect(onAuthSuccess).toHaveBeenCalledWith({
+        id: 'user-2',
+        name: 'Timeout User',
+        email: 'timeout@example.com',
+      });
+    }, { timeout: 6000 });
   });
 
 });

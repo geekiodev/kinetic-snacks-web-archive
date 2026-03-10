@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Mail, Lock, User, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
@@ -21,13 +21,45 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
   });
   const [authError, setAuthError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showBrowserWarning, setShowBrowserWarning] = useState(false);
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
   const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+
+  const logDebug = (...args: unknown[]) => {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.debug('[auth]', ...args);
+    }
+  };
 
   const validateEmail = (email: string) => {
     const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return re.test(email);
   };
+
+  useEffect(() => {
+    const dismissedKey = 'ks_browser_warning_dismissed';
+    if (window.localStorage.getItem(dismissedKey) === 'true') {
+      return;
+    }
+
+    const ua = navigator.userAgent.toLowerCase();
+    const isSafari = ua.includes('safari') && !ua.includes('chrome') && !ua.includes('chromium');
+    const braveApi = (navigator as Navigator & { brave?: { isBrave?: () => Promise<boolean> } })
+      .brave?.isBrave;
+
+    const showWarning = (isBrave: boolean) => {
+      if (isSafari || isBrave) {
+        setShowBrowserWarning(true);
+      }
+    };
+
+    if (braveApi) {
+      braveApi().then(showWarning).catch(() => showWarning(ua.includes('brave')));
+    } else {
+      showWarning(ua.includes('brave'));
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,6 +99,7 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
         let timeoutId: ReturnType<typeof setTimeout> | null = null;
         const timeout = new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => {
+            logDebug('timeout', { mode, ms });
             reject(new Error('Auth request timed out. Check your Supabase connection.'));
           }, ms);
         });
@@ -110,34 +143,107 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
           }
           return;
         }
-        const { data, error } = await withTimeout(supabase.auth.signInWithPassword({
-          email: formData.email,
-          password: formData.password,
-        }), 30000);
+        type AuthUser = { id: string; email: string | null; user_metadata?: { name?: string } };
+        type SignInResult = {
+          data: { session?: { user?: AuthUser } | null; user?: AuthUser | null } | null;
+          error: { message: string } | null;
+        } | null;
+        const loadStoredUser = () => {
+          try {
+            const stored = window.localStorage.getItem(supabase.auth.storageKey);
+            if (!stored) return null;
+            const parsed = JSON.parse(stored) as { user?: AuthUser };
+            return parsed.user ?? null;
+          } catch {
+            return null;
+          }
+        };
 
-        if (error) {
-          setAuthError(error.message);
+        let signInResult: SignInResult = null;
+        let signInTimedOut = false;
+        try {
+          signInResult = await withTimeout(
+            supabase.auth.signInWithPassword({
+              email: formData.email,
+              password: formData.password,
+            }),
+            15000
+          );
+        } catch (err) {
+          if (!(err instanceof Error) || !err.message.includes('Auth request timed out')) {
+            throw err;
+          }
+          signInTimedOut = true;
+        }
+
+        if (signInResult?.error) {
+          setAuthError(signInResult.error.message);
           return;
         }
 
-        const signedInUser = data?.user ?? data?.session?.user;
-        if (signedInUser?.email) {
+        const immediateUser = signInResult?.data?.user ?? signInResult?.data?.session?.user;
+        if (immediateUser?.email) {
           onAuthSuccess({
-            id: signedInUser.id,
-            name: signedInUser.user_metadata?.name || signedInUser.email.split('@')[0],
-            email: signedInUser.email,
+            id: immediateUser.id,
+            name: immediateUser.user_metadata?.name || immediateUser.email.split('@')[0],
+            email: immediateUser.email,
           });
           return;
         }
 
-        setAuthError('Unable to start a session. Please try again.');
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Authentication failed.';
+        const startedAt = Date.now();
+        const maxWaitMs = 8000;
+        const intervalMs = 400;
 
-        if (message.includes('Auth request timed out')) {
+        while (Date.now() - startedAt < maxWaitMs) {
+          const storedUser = loadStoredUser();
+          if (storedUser?.email) {
+            onAuthSuccess({
+              id: storedUser.id,
+              name: storedUser.user_metadata?.name || storedUser.email.split('@')[0],
+              email: storedUser.email,
+            });
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, intervalMs));
+        }
+
+        if (signInTimedOut) {
           try {
-            const { data: sessionData } = await withTimeout(supabase.auth.getSession(), 2000);
-            const sessionUser = sessionData.session?.user;
+            const response = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                apikey: supabaseAnonKey,
+              },
+              body: JSON.stringify({
+                email: formData.email,
+                password: formData.password,
+              }),
+            });
+
+            if (!response.ok) {
+              const errorPayload = await response.json().catch(() => null);
+              const message =
+                errorPayload?.error_description || errorPayload?.message || 'Authentication failed.';
+              throw new Error(message);
+            }
+
+            const authPayload = await response.json().catch(() => null);
+            if (!authPayload?.access_token || !authPayload?.refresh_token) {
+              throw new Error('Authentication response missing tokens.');
+            }
+
+            const { data: sessionData, error } = await supabase.auth.setSession({
+              access_token: authPayload.access_token,
+              refresh_token: authPayload.refresh_token,
+            });
+
+            if (error) {
+              throw new Error(error.message);
+            }
+
+            const sessionUser = sessionData.session?.user ?? authPayload.user;
             if (sessionUser?.email) {
               onAuthSuccess({
                 id: sessionUser.id,
@@ -146,12 +252,14 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
               });
               return;
             }
-          } catch {
-            // no-op fallback check
+          } catch (err) {
+            logDebug('manual sign-in fallback failed', err);
           }
-          setAuthError('Sign-in is taking longer than expected. Please check your connection and try again.');
-          return;
         }
+
+        setAuthError('Sign-in is taking longer than expected. Please check your connection and try again.');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Authentication failed.';
 
         setAuthError(message);
       } finally {
@@ -209,6 +317,26 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
                 : 'Create an account to start moving better'}
             </p>
           </div>
+
+          {showBrowserWarning && (
+            <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <p className="font-semibold">Browser notice</p>
+              <p className="mt-1 text-amber-800">
+                Brave and Safari can block auth storage. For reliable sign‑in, use Chrome or
+                disable privacy blocking for this site.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  window.localStorage.setItem('ks_browser_warning_dismissed', 'true');
+                  setShowBrowserWarning(false);
+                }}
+                className="mt-3 inline-flex items-center text-amber-900 hover:text-amber-700 font-semibold"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
