@@ -33,10 +33,6 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
     e.preventDefault();
     setAuthError('');
 
-    // #region agent log
-    fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H1',location:'Auth.tsx:36',message:'Auth submit start',data:{mode,hasSupabaseUrl:Boolean(supabaseUrl),hasAnonKey:Boolean(supabaseAnonKey),emailLength:formData.email.length,passwordLength:formData.password.length},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion agent log
-
     if (!supabaseUrl || !supabaseAnonKey) {
       setAuthError('Missing Supabase environment variables. Check VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
       return;
@@ -88,18 +84,11 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
       try {
 
         if (mode === 'signup') {
-          // #region agent log
-          fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H1',location:'Auth.tsx:90',message:'Auth signup request',data:{emailLength:formData.email.length},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion agent log
           const { data, error } = await withTimeout(supabase.auth.signUp({
             email: formData.email,
             password: formData.password,
             options: { data: { name: formData.name } },
           }));
-
-          // #region agent log
-          fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H1',location:'Auth.tsx:115',message:'Auth signup response',data:{hasError:Boolean(error),hasSession:Boolean(data?.session),hasUser:Boolean(data?.user)},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion agent log
 
           if (error) {
             setAuthError(error.message);
@@ -121,10 +110,6 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
           }
           return;
         }
-
-        // #region agent log
-        fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H3',location:'Auth.tsx:116',message:'Auth login request',data:{emailLength:formData.email.length},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion agent log
         const { data, error } = await withTimeout(supabase.auth.signInWithPassword({
           email: formData.email,
           password: formData.password,
@@ -149,13 +134,9 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Authentication failed.';
 
-        // #region agent log
-        fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H9',location:'Auth.tsx:136',message:'Auth submit error',data:{mode,errorMessage:message},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion agent log
-
         if (message.includes('Auth request timed out')) {
           try {
-            const { data: sessionData } = await supabase.auth.getSession();
+            const { data: sessionData } = await withTimeout(supabase.auth.getSession(), 2000);
             const sessionUser = sessionData.session?.user;
             if (sessionUser?.email) {
               onAuthSuccess({
