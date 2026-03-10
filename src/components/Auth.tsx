@@ -67,13 +67,10 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
     setErrors(newErrors);
 
     if (!newErrors.email && !newErrors.password && (!newErrors.name || mode === 'login')) {
-      const withTimeout = async <T,>(promise: Promise<T>, ms = 8000) => {
+      const withTimeout = async <T,>(promise: Promise<T>, ms = 10000) => {
         let timeoutId: ReturnType<typeof setTimeout> | null = null;
         const timeout = new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => {
-            // #region agent log
-            fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H2',location:'Auth.tsx:74',message:'Auth request timed out',data:{mode},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion agent log
             reject(new Error('Auth request timed out. Check your Supabase connection.'));
           }, ms);
         });
@@ -87,85 +84,6 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
         }
       };
 
-      const safeGetSession = async (ms = 1500) => {
-        try {
-          return await withTimeout(supabase.auth.getSession(), ms);
-        } catch {
-          return { data: { session: null } } as { data: { session: null } };
-        }
-      };
-
-      const resolveSessionUser = async () => {
-        const { data } = await safeGetSession();
-        return data.session?.user ?? null;
-      };
-
-      const loadStoredSession = () => {
-        if (!supabaseUrl) return null;
-        try {
-          const host = new URL(supabaseUrl).hostname;
-          const projectRef = host.split('.')[0];
-          const storageKey = `sb-${projectRef}-auth-token`;
-          const raw = localStorage.getItem(storageKey);
-          if (!raw) return null;
-          return JSON.parse(raw) as { access_token?: string; refresh_token?: string } | null;
-        } catch {
-          return null;
-        }
-      };
-
-      const decodeTokenUser = () => {
-        const stored = loadStoredSession();
-        const token = stored?.access_token;
-        if (!token) return null;
-        const parts = token.split('.');
-        if (parts.length < 2) return null;
-        const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-        const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
-        try {
-          const payload = JSON.parse(atob(padded)) as {
-            sub?: string;
-            email?: string;
-            user_metadata?: { name?: string };
-          };
-          if (!payload.sub || !payload.email) return null;
-          return {
-            id: payload.sub,
-            name: payload.user_metadata?.name || payload.email.split('@')[0],
-            email: payload.email,
-          };
-        } catch {
-          return null;
-        }
-      };
-
-      const ensureSessionFromStorage = async () => {
-        const stored = loadStoredSession();
-        if (!stored?.access_token || !stored?.refresh_token) return null;
-        try {
-          const { data } = await withTimeout(
-            supabase.auth.setSession({
-              access_token: stored.access_token,
-              refresh_token: stored.refresh_token,
-            }),
-            1500
-          );
-          return data.session?.user ?? null;
-        } catch {
-          return null;
-        }
-      };
-
-      const pollSessionUser = async (maxMs = 5000, intervalMs = 250) => {
-        const startedAt = Date.now();
-        while (Date.now() - startedAt < maxMs) {
-          const user = await resolveSessionUser();
-          if (user) return user;
-          await new Promise((resolve) => setTimeout(resolve, intervalMs));
-        }
-        return null;
-      };
-
       setIsSubmitting(true);
       try {
 
@@ -173,24 +91,11 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
           // #region agent log
           fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H1',location:'Auth.tsx:90',message:'Auth signup request',data:{emailLength:formData.email.length},timestamp:Date.now()})}).catch(()=>{});
           // #endregion agent log
-          const signUpPromise = supabase.auth.signUp({
+          const { data, error } = await withTimeout(supabase.auth.signUp({
             email: formData.email,
             password: formData.password,
             options: { data: { name: formData.name } },
-          });
-          signUpPromise.catch(() => null);
-
-          const sessionUser = await pollSessionUser();
-          if (sessionUser?.email) {
-            onAuthSuccess({
-              id: sessionUser.id,
-              name: formData.name || sessionUser.email.split('@')[0],
-              email: sessionUser.email,
-            });
-            return;
-          }
-
-          const { data, error } = await withTimeout(signUpPromise);
+          }));
 
           // #region agent log
           fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H1',location:'Auth.tsx:115',message:'Auth signup response',data:{hasError:Boolean(error),hasSession:Boolean(data?.session),hasUser:Boolean(data?.user)},timestamp:Date.now()})}).catch(()=>{});
@@ -201,7 +106,7 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
             return;
           }
 
-          const postSessionUser = data?.session?.user ?? (await resolveSessionUser());
+          const postSessionUser = data?.session?.user;
           if (!postSessionUser) {
             setAuthError('Check your email to confirm your account.');
             return;
@@ -220,45 +125,23 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
         // #region agent log
         fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H3',location:'Auth.tsx:116',message:'Auth login request',data:{emailLength:formData.email.length},timestamp:Date.now()})}).catch(()=>{});
         // #endregion agent log
-        const signInPromise = supabase.auth.signInWithPassword({
+        const { data, error } = await withTimeout(supabase.auth.signInWithPassword({
           email: formData.email,
           password: formData.password,
-        });
-        signInPromise.catch(() => null);
+        }), 10000);
 
-        const signInResult = await withTimeout(signInPromise, 1500).catch(() => null);
-        if (signInResult?.data?.user?.email) {
-          onAuthSuccess({
-            id: signInResult.data.user.id,
-            name: signInResult.data.user.user_metadata?.name || signInResult.data.user.email.split('@')[0],
-            email: signInResult.data.user.email,
-          });
+        if (error) {
+          setAuthError(error.message);
           return;
         }
 
-        const sessionUser = await pollSessionUser(6000, 300);
-        if (sessionUser?.email) {
+        const signedInUser = data?.user ?? data?.session?.user;
+        if (signedInUser?.email) {
           onAuthSuccess({
-            id: sessionUser.id,
-            name: sessionUser.user_metadata?.name || sessionUser.email.split('@')[0],
-            email: sessionUser.email,
+            id: signedInUser.id,
+            name: signedInUser.user_metadata?.name || signedInUser.email.split('@')[0],
+            email: signedInUser.email,
           });
-          return;
-        }
-
-        const storageUser = await ensureSessionFromStorage();
-        if (storageUser?.email) {
-          onAuthSuccess({
-            id: storageUser.id,
-            name: storageUser.user_metadata?.name || storageUser.email.split('@')[0],
-            email: storageUser.email,
-          });
-          return;
-        }
-
-        const decodedUser = decodeTokenUser();
-        if (decodedUser) {
-          onAuthSuccess(decodedUser);
           return;
         }
 
@@ -269,31 +152,6 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
         // #region agent log
         fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H9',location:'Auth.tsx:136',message:'Auth submit error',data:{mode,errorMessage:message},timestamp:Date.now()})}).catch(()=>{});
         // #endregion agent log
-
-        if (message.includes('Auth request timed out')) {
-          try {
-            const sessionUser = (await resolveSessionUser()) ?? (await ensureSessionFromStorage());
-            if (sessionUser?.email) {
-              onAuthSuccess({
-                id: sessionUser.id,
-                name: sessionUser.user_metadata?.name || sessionUser.email.split('@')[0],
-                email: sessionUser.email,
-              });
-              return;
-            }
-
-            const decodedUser = decodeTokenUser();
-            if (decodedUser) {
-              onAuthSuccess(decodedUser);
-              return;
-            }
-          } catch (sessionError) {
-            const sessionMessage = sessionError instanceof Error ? sessionError.message : 'unknown error';
-            // #region agent log
-            fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H9',location:'Auth.tsx:158',message:'Auth fallback failed',data:{errorMessage:sessionMessage},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion agent log
-          }
-        }
 
         setAuthError(message);
       } finally {
