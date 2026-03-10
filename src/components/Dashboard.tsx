@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import { Exercise, UserPreferences, View, SubscriptionPlan } from '../App';
 import { supabase } from '../lib/supabase';
+import { loadLimitationRules, validateExerciseCandidate } from '../lib/exerciseValidation';
+import { generateExercises, rankExercises } from '../lib/exerciseGenerator';
 
 interface DashboardProps {
   onViewExercise: (exercise: Exercise) => void;
@@ -33,6 +35,9 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
   const [todayCount, setTodayCount] = useState(0);
   const [weeklyCount, setWeeklyCount] = useState(0);
   const [weeklyMinutes, setWeeklyMinutes] = useState(0);
+  const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [isLoadingExercises, setIsLoadingExercises] = useState(false);
+  const [exerciseError, setExerciseError] = useState('');
 
   const isPremium = subscriptionPlan === 'premium';
   const freeLimit = 3;
@@ -115,59 +120,77 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
     loadStats();
   }, [userId]);
 
-  const mockExercises: Exercise[] = [
-    {
-      id: '1',
-      title: 'Desk-Side Stretching Sequence',
-      duration: 5,
-      intensity: 'low',
-      equipment: ['None / Bodyweight Only'],
-      instructions: [
-        'Stand behind your chair',
-        'Reach arms overhead for 30 seconds',
-        'Side bends - 10 each side',
-        'Gentle torso twists',
-        'Neck rolls - 5 each direction'
-      ],
-      tips: 'Perfect for between meetings. No changing required.',
-      scheduledTime: '10:30 AM',
-      category: 'Mobility'
-    },
-    {
-      id: '2',
-      title: 'Standing Leg Activators',
-      duration: 7,
-      intensity: 'low',
-      equipment: ['Chair'],
-      instructions: [
-        'Use chair for balance if needed',
-        'Calf raises - 15 reps',
-        'Single leg balance - 30 sec each',
-        'Gentle leg swings - 10 each direction',
-        'Standing glute squeezes - 20 reps'
-      ],
-      tips: 'Great for improving circulation during long work sessions.',
-      scheduledTime: '2:15 PM',
-      category: 'Strength'
-    },
-    {
-      id: '3',
-      title: 'Wall-Assisted Upper Body',
-      duration: 8,
-      intensity: 'medium',
-      equipment: ['Wall Space'],
-      instructions: [
-        'Wall push-ups - 12 reps',
-        'Wall angels - 15 reps',
-        'Wall slides - 10 reps',
-        'Shoulder blade squeezes against wall',
-        'Chest stretch using doorframe'
-      ],
-      tips: 'Builds upper body strength without equipment.',
-      scheduledTime: '4:45 PM',
-      category: 'Strength'
-    }
-  ];
+  useEffect(() => {
+    const loadExercises = async () => {
+      setIsLoadingExercises(true);
+      setExerciseError('');
+      try {
+        const { data, error } = await supabase
+          .from('exercises')
+          .select('id,title,duration_minutes,intensity,equipment,instructions,tips,category,is_active')
+          .eq('is_active', true);
+
+        if (error || !data) {
+          throw new Error(error?.message || 'Failed to load exercises');
+        }
+
+        const mapped = data.map((row) => ({
+          id: row.id,
+          title: row.title,
+          duration: row.duration_minutes,
+          intensity: row.intensity === 'high' ? 'medium' : row.intensity,
+          equipment: row.equipment ?? [],
+          instructions: row.instructions ?? [],
+          tips: row.tips ?? '',
+          category: row.category ?? 'General',
+        })) as Exercise[];
+
+        const limitationRules = await loadLimitationRules();
+        const filtered = mapped.filter((exercise) =>
+          validateExerciseCandidate(exercise, userPreferences, limitationRules).valid
+        );
+        const ranked = rankExercises({ preferences: userPreferences, exercises: filtered });
+
+        const minCount = 3;
+        if (ranked.length < minCount) {
+          const generated = await generateExercises({
+            preferences: userPreferences,
+            count: minCount - ranked.length,
+          });
+          const validatedGenerated = generated.filter((exercise) =>
+            validateExerciseCandidate(exercise, userPreferences, limitationRules).valid
+          );
+          const persistGenerated = false;
+          if (persistGenerated && validatedGenerated.length > 0) {
+            void supabase.from('exercises').insert(
+              validatedGenerated.map((exercise) => ({
+                title: exercise.title,
+                duration_minutes: exercise.duration,
+                intensity: exercise.intensity,
+                equipment: exercise.equipment,
+                instructions: exercise.instructions,
+                tips: exercise.tips,
+                category: exercise.category,
+                is_active: false,
+              }))
+            );
+          }
+          setExercises(rankExercises({ preferences: userPreferences, exercises: [...ranked, ...validatedGenerated] }));
+          return;
+        }
+
+        setExercises(ranked);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unable to load exercises.';
+        setExerciseError(message);
+        setExercises([]);
+      } finally {
+        setIsLoadingExercises(false);
+      }
+    };
+
+    loadExercises();
+  }, [userPreferences]);
 
   const handleExerciseClick = (exercise: Exercise) => {
     if (!isPremium && exercisesViewedToday >= freeLimit) {
@@ -183,7 +206,10 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
       onUpgrade();
       return;
     }
-    const randomExercise = mockExercises[Math.floor(Math.random() * mockExercises.length)];
+    if (exercises.length === 0) {
+      return;
+    }
+    const randomExercise = exercises[Math.floor(Math.random() * exercises.length)];
     setExercisesViewedToday(prev => prev + 1);
     onViewExercise(randomExercise);
   };
@@ -398,12 +424,18 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
               Today's Movement Timeline
             </h2>
             <span className="text-sm text-slate-500 font-medium">
-              {mockExercises.length} snacks scheduled
+              {exercises.length} snacks scheduled
             </span>
           </div>
 
           <div className="space-y-3">
-            {mockExercises.map((exercise, index) => {
+            {isLoadingExercises && (
+              <div className="text-sm text-slate-500">Loading exercises...</div>
+            )}
+            {!isLoadingExercises && exerciseError && (
+              <div className="text-sm text-red-600">{exerciseError}</div>
+            )}
+            {!isLoadingExercises && !exerciseError && exercises.map((exercise, index) => {
               const isLocked = !isPremium && index >= freeLimit;
               return (
                 <ExerciseCard

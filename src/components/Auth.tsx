@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Mail, Lock, User, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
@@ -21,13 +21,45 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
   });
   const [authError, setAuthError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showBrowserWarning, setShowBrowserWarning] = useState(false);
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
   const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+
+  const logDebug = (...args: unknown[]) => {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.debug('[auth]', ...args);
+    }
+  };
 
   const validateEmail = (email: string) => {
     const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return re.test(email);
   };
+
+  useEffect(() => {
+    const dismissedKey = 'ks_browser_warning_dismissed';
+    if (window.localStorage.getItem(dismissedKey) === 'true') {
+      return;
+    }
+
+    const ua = navigator.userAgent.toLowerCase();
+    const isSafari = ua.includes('safari') && !ua.includes('chrome') && !ua.includes('chromium');
+    const braveApi = (navigator as Navigator & { brave?: { isBrave?: () => Promise<boolean> } })
+      .brave?.isBrave;
+
+    const showWarning = (isBrave: boolean) => {
+      if (isSafari || isBrave) {
+        setShowBrowserWarning(true);
+      }
+    };
+
+    if (braveApi) {
+      braveApi().then(showWarning).catch(() => showWarning(ua.includes('brave')));
+    } else {
+      showWarning(ua.includes('brave'));
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,24 +95,26 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
     setErrors(newErrors);
 
     if (!newErrors.email && !newErrors.password && (!newErrors.name || mode === 'login')) {
+      const withTimeout = async <T,>(promise: Promise<T>, ms = 30000) => {
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        const timeout = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            logDebug('timeout', { mode, ms });
+            reject(new Error('Auth request timed out. Check your Supabase connection.'));
+          }, ms);
+        });
+
+        try {
+          return await Promise.race([promise, timeout]);
+        } finally {
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+          }
+        }
+      };
+
       setIsSubmitting(true);
       try {
-        const withTimeout = async <T,>(promise: Promise<T>) => {
-          let timeoutId: ReturnType<typeof setTimeout> | null = null;
-          const timeout = new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => {
-              reject(new Error('Auth request timed out. Check your Supabase connection.'));
-            }, 8000);
-          });
-
-          try {
-            return await Promise.race([promise, timeout]);
-          } finally {
-            if (timeoutId) {
-              clearTimeout(timeoutId);
-            }
-          }
-        };
 
         if (mode === 'signup') {
           const { data, error } = await withTimeout(supabase.auth.signUp({
@@ -94,40 +128,140 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
             return;
           }
 
-          if (!data.session) {
+          const postSessionUser = data?.session?.user;
+          if (!postSessionUser) {
             setAuthError('Check your email to confirm your account.');
             return;
           }
 
-          if (data.user?.email) {
+          if (postSessionUser.email) {
             onAuthSuccess({
-              id: data.user.id,
-              name: formData.name || data.user.email.split('@')[0],
-              email: data.user.email,
+              id: postSessionUser.id,
+              name: formData.name || postSessionUser.email.split('@')[0],
+              email: postSessionUser.email,
             });
           }
           return;
         }
+        type AuthUser = { id: string; email: string | null; user_metadata?: { name?: string } };
+        type SignInResult = {
+          data: { session?: { user?: AuthUser } | null; user?: AuthUser | null } | null;
+          error: { message: string } | null;
+        } | null;
+        const loadStoredUser = () => {
+          try {
+            const stored = window.localStorage.getItem(supabase.auth.storageKey);
+            if (!stored) return null;
+            const parsed = JSON.parse(stored) as { user?: AuthUser };
+            return parsed.user ?? null;
+          } catch {
+            return null;
+          }
+        };
 
-        const { data, error } = await withTimeout(supabase.auth.signInWithPassword({
-          email: formData.email,
-          password: formData.password,
-        }));
+        let signInResult: SignInResult = null;
+        let signInTimedOut = false;
+        try {
+          signInResult = await withTimeout(
+            supabase.auth.signInWithPassword({
+              email: formData.email,
+              password: formData.password,
+            }),
+            15000
+          );
+        } catch (err) {
+          if (!(err instanceof Error) || !err.message.includes('Auth request timed out')) {
+            throw err;
+          }
+          signInTimedOut = true;
+        }
 
-        if (error) {
-          setAuthError(error.message);
+        if (signInResult?.error) {
+          setAuthError(signInResult.error.message);
           return;
         }
 
-        if (data.user?.email) {
+        const immediateUser = signInResult?.data?.user ?? signInResult?.data?.session?.user;
+        if (immediateUser?.email) {
           onAuthSuccess({
-            id: data.user.id,
-            name: data.user.user_metadata?.name || data.user.email.split('@')[0],
-            email: data.user.email,
+            id: immediateUser.id,
+            name: immediateUser.user_metadata?.name || immediateUser.email.split('@')[0],
+            email: immediateUser.email,
           });
+          return;
         }
+
+        const startedAt = Date.now();
+        const maxWaitMs = 8000;
+        const intervalMs = 400;
+
+        while (Date.now() - startedAt < maxWaitMs) {
+          const storedUser = loadStoredUser();
+          if (storedUser?.email) {
+            onAuthSuccess({
+              id: storedUser.id,
+              name: storedUser.user_metadata?.name || storedUser.email.split('@')[0],
+              email: storedUser.email,
+            });
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, intervalMs));
+        }
+
+        if (signInTimedOut) {
+          try {
+            const response = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                apikey: supabaseAnonKey,
+              },
+              body: JSON.stringify({
+                email: formData.email,
+                password: formData.password,
+              }),
+            });
+
+            if (!response.ok) {
+              const errorPayload = await response.json().catch(() => null);
+              const message =
+                errorPayload?.error_description || errorPayload?.message || 'Authentication failed.';
+              throw new Error(message);
+            }
+
+            const authPayload = await response.json().catch(() => null);
+            if (!authPayload?.access_token || !authPayload?.refresh_token) {
+              throw new Error('Authentication response missing tokens.');
+            }
+
+            const { data: sessionData, error } = await supabase.auth.setSession({
+              access_token: authPayload.access_token,
+              refresh_token: authPayload.refresh_token,
+            });
+
+            if (error) {
+              throw new Error(error.message);
+            }
+
+            const sessionUser = sessionData.session?.user ?? authPayload.user;
+            if (sessionUser?.email) {
+              onAuthSuccess({
+                id: sessionUser.id,
+                name: sessionUser.user_metadata?.name || sessionUser.email.split('@')[0],
+                email: sessionUser.email,
+              });
+              return;
+            }
+          } catch (err) {
+            logDebug('manual sign-in fallback failed', err);
+          }
+        }
+
+        setAuthError('Sign-in is taking longer than expected. Please check your connection and try again.');
       } catch (error) {
-        setAuthError(error instanceof Error ? error.message : 'Authentication failed.');
+        const message = error instanceof Error ? error.message : 'Authentication failed.';
+
+        setAuthError(message);
       } finally {
         setIsSubmitting(false);
       }
@@ -184,6 +318,26 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
             </p>
           </div>
 
+          {showBrowserWarning && (
+            <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <p className="font-semibold">Browser notice</p>
+              <p className="mt-1 text-amber-800">
+                Brave and Safari can block auth storage. For reliable sign‑in, use Chrome or
+                disable privacy blocking for this site.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  window.localStorage.setItem('ks_browser_warning_dismissed', 'true');
+                  setShowBrowserWarning(false);
+                }}
+                className="mt-3 inline-flex items-center text-amber-900 hover:text-amber-700 font-semibold"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
             {mode === 'signup' && (
@@ -195,7 +349,9 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                   <input
                     id="name"
+                    name="name"
                     type="text"
+                    autoComplete="name"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     className={`w-full pl-11 pr-4 py-3 rounded-xl border-2 transition-all text-slate-900 placeholder:text-slate-400 ${
@@ -220,7 +376,9 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   id="email"
+                  name="email"
                   type="email"
+                  autoComplete="email"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   className={`w-full pl-11 pr-4 py-3 rounded-xl border-2 transition-all text-slate-900 placeholder:text-slate-400 ${
@@ -244,7 +402,9 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   id="password"
+                  name="password"
                   type={showPassword ? 'text' : 'password'}
+                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   className={`w-full pl-11 pr-12 py-3 rounded-xl border-2 transition-all text-slate-900 placeholder:text-slate-400 ${
@@ -276,6 +436,8 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
+                    name="rememberMe"
+                    autoComplete="off"
                     className="w-4 h-4 rounded border-stone-300 text-orange-600 focus:ring-orange-500"
                   />
                   <span className="text-slate-600">Remember me</span>

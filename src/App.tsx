@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Landing from './components/Landing';
 import Onboarding from './components/Onboarding';
 import Dashboard from './components/Dashboard';
@@ -46,6 +46,8 @@ function App() {
   const [subscriptionPlan, setSubscriptionPlan] = useState<SubscriptionPlan>('free');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const authReadyRef = useRef(false);
   const [userPreferences, setUserPreferences] = useState<UserPreferences>({
     limitations: [],
     equipment: [],
@@ -97,35 +99,117 @@ function App() {
   useEffect(() => {
     let isMounted = true;
 
-    const initSession = async () => {
-      const { data } = await supabase.auth.getSession();
-      if (!isMounted) return;
+    const markAuthReady = () => {
+      authReadyRef.current = true;
+      setIsAuthReady(true);
+    };
 
-      if (data.session?.user) {
-        const hasProfile = await handleSessionUser(data.session.user);
-        if (!isMounted) return;
-        setCurrentView(hasProfile ? 'dashboard' : 'onboarding');
+    const loadStoredSessionUser = () => {
+      try {
+        const stored = window.localStorage.getItem(supabase.auth.storageKey);
+        if (!stored) return null;
+        const parsed = JSON.parse(stored) as {
+          user?: { id: string; email?: string; user_metadata?: { name?: string } };
+        };
+        return parsed.user ?? null;
+      } catch {
+        return null;
       }
     };
 
-    initSession();
+    const readyTimeout = window.setTimeout(() => {
+      if (isMounted && !authReadyRef.current) {
+        markAuthReady();
+      }
+    }, 2000);
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!isMounted) return;
+
       if (session?.user) {
         const hasProfile = await handleSessionUser(session.user);
+        if (!isMounted) return;
         setCurrentView(hasProfile ? 'dashboard' : 'onboarding');
       } else {
         setUser(null);
-      setProfileLoadError(null);
-        setCurrentView('landing');
+        setProfileLoadError(null);
+        if (authReadyRef.current) {
+          setCurrentView('landing');
+        }
+      }
+
+      if (event === 'INITIAL_SESSION') {
+        markAuthReady();
       }
     });
 
+    const bootstrapFromStorage = async (attempts = 5, intervalMs = 400) => {
+      for (let i = 0; i < attempts; i += 1) {
+        const storedUser = loadStoredSessionUser();
+        if (storedUser?.email) {
+          const hasProfile = await handleSessionUser(storedUser);
+          if (!isMounted) return;
+          setCurrentView(hasProfile ? 'dashboard' : 'onboarding');
+          markAuthReady();
+          return;
+        }
+        if (i < attempts - 1) {
+          await new Promise((resolve) => setTimeout(resolve, intervalMs));
+        }
+      }
+    };
+
+    bootstrapFromStorage();
+
     return () => {
       isMounted = false;
+      window.clearTimeout(readyTimeout);
       authListener.subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (user || currentView === 'dashboard') {
+      return;
+    }
+
+    let isActive = true;
+    const intervalMs = 400;
+    const maxChecks = 20;
+    let checks = 0;
+
+    const checkStoredSession = async () => {
+      if (!isActive) return;
+      checks += 1;
+
+      try {
+        const stored = window.localStorage.getItem(supabase.auth.storageKey);
+        if (stored) {
+          const parsed = JSON.parse(stored) as {
+            user?: { id: string; email?: string; user_metadata?: { name?: string } };
+          };
+          if (parsed.user?.email) {
+            const hasProfile = await handleSessionUser(parsed.user);
+            if (!isActive) return;
+            setCurrentView(hasProfile ? 'dashboard' : 'onboarding');
+            return;
+          }
+        }
+      } catch {
+        // ignore parse errors
+      }
+
+      if (checks < maxChecks) {
+        window.setTimeout(checkStoredSession, intervalMs);
+      }
+    };
+
+    checkStoredSession();
+
+    return () => {
+      isActive = false;
+    };
+  }, [currentView, user]);
 
   const handleViewChange = (view: View, exercise?: Exercise) => {
     setCurrentView(view);
