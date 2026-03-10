@@ -67,7 +67,7 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
     setErrors(newErrors);
 
     if (!newErrors.email && !newErrors.password && (!newErrors.name || mode === 'login')) {
-      const withTimeout = async <T,>(promise: Promise<T>, ms = 10000) => {
+      const withTimeout = async <T,>(promise: Promise<T>, ms = 20000) => {
         let timeoutId: ReturnType<typeof setTimeout> | null = null;
         const timeout = new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => {
@@ -152,6 +152,25 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
         // #region agent log
         fetch('http://127.0.0.1:7281/ingest/2037fe9d-b26b-4b11-8a4f-175b0797c134',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1940d4'},body:JSON.stringify({sessionId:'1940d4',runId:'auth-debug',hypothesisId:'H9',location:'Auth.tsx:136',message:'Auth submit error',data:{mode,errorMessage:message},timestamp:Date.now()})}).catch(()=>{});
         // #endregion agent log
+
+        if (message.includes('Auth request timed out')) {
+          try {
+            const { data: sessionData } = await supabase.auth.getSession();
+            const sessionUser = sessionData.session?.user;
+            if (sessionUser?.email) {
+              onAuthSuccess({
+                id: sessionUser.id,
+                name: sessionUser.user_metadata?.name || sessionUser.email.split('@')[0],
+                email: sessionUser.email,
+              });
+              return;
+            }
+          } catch {
+            // no-op fallback check
+          }
+          setAuthError('Sign-in is taking longer than expected. Please try again in a few seconds.');
+          return;
+        }
 
         setAuthError(message);
       } finally {
