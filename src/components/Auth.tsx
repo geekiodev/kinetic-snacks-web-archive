@@ -63,7 +63,7 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
     setErrors(newErrors);
 
     if (!newErrors.email && !newErrors.password && (!newErrors.name || mode === 'login')) {
-      const withTimeout = async <T,>(promise: Promise<T>, ms = 20000) => {
+      const withTimeout = async <T,>(promise: Promise<T>, ms = 30000) => {
         let timeoutId: ReturnType<typeof setTimeout> | null = null;
         const timeout = new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => {
@@ -113,7 +113,7 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
         const { data, error } = await withTimeout(supabase.auth.signInWithPassword({
           email: formData.email,
           password: formData.password,
-        }), 10000);
+        }), 30000);
 
         if (error) {
           setAuthError(error.message);
@@ -149,7 +149,7 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
           } catch {
             // no-op fallback check
           }
-          setAuthError('Sign-in is taking longer than expected. Please try again in a few seconds.');
+          setAuthError('Sign-in is taking longer than expected. Please check your connection and try again.');
           return;
         }
 

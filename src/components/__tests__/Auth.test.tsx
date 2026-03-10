@@ -78,4 +78,48 @@ describe('Auth', () => {
       email: 'user@example.com',
     });
   });
+
+  it('recovers from timeout when a session becomes available', async () => {
+    const onAuthSuccess = vi.fn();
+    const sessionUser = {
+      id: 'user-2',
+      email: 'timeout@example.com',
+      user_metadata: { name: 'Timeout User' },
+    };
+
+    const supabaseMock = supabase as unknown as {
+      auth: {
+        getSession: ReturnType<typeof vi.fn>;
+        signInWithPassword: ReturnType<typeof vi.fn>;
+      };
+    };
+
+    supabaseMock.auth.signInWithPassword.mockRejectedValue(
+      new Error('Auth request timed out. Check your Supabase connection.')
+    );
+    supabaseMock.auth.getSession.mockResolvedValue({
+      data: { session: { user: sessionUser } },
+    });
+
+    render(<Auth onAuthSuccess={onAuthSuccess} />);
+
+    await userEvent.type(screen.getByLabelText('Email Address'), 'timeout@example.com');
+    await userEvent.type(screen.getByLabelText('Password'), 'password123');
+
+    const submit = screen
+      .getAllByRole('button', { name: /sign in/i })
+      .find((button) => button.getAttribute('type') === 'submit');
+    if (!submit) {
+      throw new Error('Submit button not found');
+    }
+
+    await userEvent.click(submit);
+
+    expect(onAuthSuccess).toHaveBeenCalledWith({
+      id: 'user-2',
+      name: 'Timeout User',
+      email: 'timeout@example.com',
+    });
+  });
+
 });
