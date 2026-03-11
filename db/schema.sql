@@ -126,6 +126,117 @@ create table if not exists public.exercise_completions (
   completed_at timestamp with time zone default now()
 );
 
+-- Exercise views (free-tier usage ledger)
+create table if not exists public.exercise_views (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  exercise_id uuid not null references public.exercises(id) on delete cascade,
+  day_key date not null,
+  viewed_at timestamp with time zone default now(),
+  created_at timestamp with time zone default now(),
+  unique (user_id, exercise_id, day_key)
+);
+
+create index if not exists exercise_views_user_day_idx
+  on public.exercise_views (user_id, day_key);
+
+alter table public.exercise_views enable row level security;
+
+create policy "exercise_views_select_own"
+on public.exercise_views for select
+to authenticated
+using (auth.uid() = user_id);
+
+create policy "exercise_views_insert_own"
+on public.exercise_views for insert
+to authenticated
+with check (auth.uid() = user_id);
+
+-- Plans and subscriptions (entitlements)
+create table if not exists public.plans (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  entitlements jsonb not null default '{}'::jsonb,
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now()
+);
+
+create table if not exists public.subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null unique references auth.users(id) on delete cascade,
+  plan_id uuid not null references public.plans(id),
+  status text default 'active',
+  expires_at timestamp with time zone,
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now()
+);
+
+alter table public.plans enable row level security;
+alter table public.subscriptions enable row level security;
+
+drop policy if exists "plans_select_all" on public.plans;
+create policy "plans_select_all"
+on public.plans for select
+to authenticated
+using (true);
+
+drop policy if exists "subscriptions_select_own" on public.subscriptions;
+create policy "subscriptions_select_own"
+on public.subscriptions for select
+to authenticated
+using (auth.uid() = user_id);
+
+-- Usage ledgers (metered entitlements)
+create table if not exists public.ai_plan_generations (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  month_key date not null,
+  created_at timestamp with time zone default now()
+);
+
+create index if not exists ai_plan_generations_user_month_idx
+  on public.ai_plan_generations (user_id, month_key);
+
+alter table public.ai_plan_generations enable row level security;
+
+drop policy if exists "ai_plan_generations_select_own" on public.ai_plan_generations;
+drop policy if exists "ai_plan_generations_insert_own" on public.ai_plan_generations;
+
+create policy "ai_plan_generations_select_own"
+on public.ai_plan_generations for select
+to authenticated
+using (auth.uid() = user_id);
+
+create policy "ai_plan_generations_insert_own"
+on public.ai_plan_generations for insert
+to authenticated
+with check (auth.uid() = user_id);
+
+create table if not exists public.exercise_generations (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  month_key date not null,
+  created_at timestamp with time zone default now()
+);
+
+create index if not exists exercise_generations_user_month_idx
+  on public.exercise_generations (user_id, month_key);
+
+alter table public.exercise_generations enable row level security;
+
+drop policy if exists "exercise_generations_select_own" on public.exercise_generations;
+drop policy if exists "exercise_generations_insert_own" on public.exercise_generations;
+
+create policy "exercise_generations_select_own"
+on public.exercise_generations for select
+to authenticated
+using (auth.uid() = user_id);
+
+create policy "exercise_generations_insert_own"
+on public.exercise_generations for insert
+to authenticated
+with check (auth.uid() = user_id);
+
 alter table public.exercise_completions enable row level security;
 
 create policy "exercise_completions_select_own"

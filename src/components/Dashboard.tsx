@@ -30,7 +30,8 @@ interface DashboardProps {
 export default function Dashboard({ onViewExercise, onNavigate, userId, userPreferences, subscriptionPlan, onUpgrade }: DashboardProps) {
   const [selectedDate, setSelectedDate] = useState('today');
   const [greeting, setGreeting] = useState('');
-  const [exercisesViewedToday, setExercisesViewedToday] = useState(0);
+  const [freeRemaining, setFreeRemaining] = useState<number | null>(null);
+  const [freeLimit, setFreeLimit] = useState(3);
   const [currentStreak, setCurrentStreak] = useState(0);
   const [todayCount, setTodayCount] = useState(0);
   const [weeklyCount, setWeeklyCount] = useState(0);
@@ -40,8 +41,6 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
   const [exerciseError, setExerciseError] = useState('');
 
   const isPremium = subscriptionPlan === 'premium';
-  const freeLimit = 3;
-  const remainingFreeExercises = Math.max(0, freeLimit - exercisesViewedToday);
 
   useEffect(() => {
     const hour = new Date().getHours();
@@ -121,6 +120,32 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
   }, [userId]);
 
   useEffect(() => {
+    const loadFreeUsage = async () => {
+      if (!userId || isPremium) {
+        setFreeRemaining(null);
+        return;
+      }
+
+      const dayKey = new Date().toISOString().slice(0, 10);
+      const { count, error } = await supabase
+        .from('exercise_views')
+        .select('exercise_id', { head: true, count: 'exact' })
+        .eq('user_id', userId)
+        .eq('day_key', dayKey);
+
+      if (error) {
+        setFreeRemaining(null);
+        return;
+      }
+
+      const remaining = Math.max(0, freeLimit - (count ?? 0));
+      setFreeRemaining(remaining);
+    };
+
+    void loadFreeUsage();
+  }, [userId, isPremium, freeLimit]);
+
+  useEffect(() => {
     const loadExercises = async () => {
       setIsLoadingExercises(true);
       setExerciseError('');
@@ -192,33 +217,162 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
     loadExercises();
   }, [userPreferences]);
 
-  const handleExerciseClick = (exercise: Exercise) => {
-    if (!isPremium && exercisesViewedToday >= freeLimit) {
+  const ensureSession = async (attempts = 2, delayMs = 300) => {
+    for (let i = 0; i < attempts; i += 1) {
+      const { data } = await supabase.auth.getSession();
+      let session = data.session;
+
+      if (!session) {
+        try {
+          const stored = window.localStorage.getItem(supabase.auth.storageKey);
+          if (stored) {
+            const parsed = JSON.parse(stored) as { access_token?: string; refresh_token?: string };
+            if (parsed.access_token && parsed.refresh_token) {
+              await supabase.auth.setSession({
+                access_token: parsed.access_token,
+                refresh_token: parsed.refresh_token,
+              });
+              const refreshed = await supabase.auth.getSession();
+              session = refreshed.data.session;
+            }
+          }
+        } catch {
+          // ignore storage errors
+        }
+      }
+
+      if (session?.access_token) {
+        return true;
+      }
+
+      if (i < attempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+
+    return false;
+  };
+
+  const requestViewPermission = async (exerciseId: string) => {
+    if (isPremium) {
+      return true;
+    }
+
+    if (!userId) {
       onUpgrade();
+      return false;
+    }
+
+    const hasSession = await ensureSession();
+    if (!hasSession) {
+      setExerciseError('Please sign in again to verify access.');
+      return false;
+    }
+
+    const { data, error } = await supabase.functions.invoke('allow-exercise-view', {
+      body: { exercise_id: exerciseId },
+    });
+
+    if (error && error.message?.includes('401')) {
+      await supabase.auth.refreshSession();
+      const retry = await supabase.functions.invoke('allow-exercise-view', {
+        body: { exercise_id: exerciseId },
+      });
+      if (retry.error || !retry.data) {
+        setExerciseError(retry.error?.message || 'Unable to verify free-tier usage.');
+        return false;
+      }
+      const limit = Number(retry.data.limit);
+      const remaining = retry.data.remaining === null ? null : Number(retry.data.remaining);
+      if (Number.isFinite(limit)) {
+        setFreeLimit(limit);
+      }
+      setFreeRemaining(remaining);
+      if (!retry.data.allowed) {
+        onUpgrade();
+        return false;
+      }
+      return true;
+    }
+
+    if (error || !data) {
+      setExerciseError(error?.message || 'Unable to verify free-tier usage.');
+      return false;
+    }
+
+    const limit = Number(data.limit);
+    const remaining = data.remaining === null ? null : Number(data.remaining);
+    if (Number.isFinite(limit)) {
+      setFreeLimit(limit);
+    }
+    setFreeRemaining(remaining);
+
+    if (!data.allowed) {
+      onUpgrade();
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleExerciseClick = async (exercise: Exercise) => {
+    const allowed = await requestViewPermission(exercise.id);
+    if (!allowed) {
       return;
     }
-    setExercisesViewedToday(prev => prev + 1);
     onViewExercise(exercise);
   };
 
-  const handleRouletteMode = () => {
-    if (!isPremium && exercisesViewedToday >= freeLimit) {
-      onUpgrade();
-      return;
-    }
+  const handleRouletteMode = async () => {
     if (exercises.length === 0) {
       return;
     }
     const randomExercise = exercises[Math.floor(Math.random() * exercises.length)];
-    setExercisesViewedToday(prev => prev + 1);
+    const allowed = await requestViewPermission(randomExercise.id);
+    if (!allowed) {
+      return;
+    }
     onViewExercise(randomExercise);
   };
 
-  const handleSpaceAnalysis = () => {
-    if (!isPremium) {
+  const handleSpaceAnalysis = async () => {
+    const hasSession = await ensureSession();
+    if (!hasSession) {
+      setExerciseError('Please sign in again to verify access.');
+      return;
+    }
+
+    const { data, error } = await supabase.functions.invoke('allow-space-analysis', {
+      body: {},
+    });
+
+    if (error && error.message?.includes('401')) {
+      await supabase.auth.refreshSession();
+      const retry = await supabase.functions.invoke('allow-space-analysis', {
+        body: {},
+      });
+      if (retry.error || !retry.data) {
+        setExerciseError(retry.error?.message || 'Unable to verify space analysis access.');
+        return;
+      }
+      if (!retry.data.allowed) {
+        onUpgrade();
+        return;
+      }
+      onNavigate('space-analysis');
+      return;
+    }
+
+    if (error || !data) {
+      setExerciseError(error?.message || 'Unable to verify space analysis access.');
+      return;
+    }
+
+    if (!data.allowed) {
       onUpgrade();
       return;
     }
+
     onNavigate('space-analysis');
   };
 
@@ -248,7 +402,7 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
               </div>
 
               <button
-                onClick={() => onNavigate('space-analysis')}
+                onClick={handleSpaceAnalysis}
                 className="touch-target p-2.5 sm:p-2 hover:bg-stone-100 rounded-lg transition-smooth active:scale-95"
                 title="Space Analysis"
               >
@@ -290,9 +444,11 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
                     <h3 className="text-xl sm:text-2xl font-bold text-white">Upgrade to Premium</h3>
                   </div>
                   <p className="text-white/95 text-sm sm:text-base mb-3">
-                    {remainingFreeExercises > 0
-                      ? `${remainingFreeExercises} of ${freeLimit} free exercises remaining today. Get unlimited access!`
-                      : `You've reached your daily limit. Upgrade for unlimited exercises!`
+                    {freeRemaining === null
+                      ? `Free usage resets daily. Get unlimited access with Premium.`
+                      : freeRemaining > 0
+                        ? `${freeRemaining} of ${freeLimit} free exercises remaining today. Get unlimited access!`
+                        : `You've reached your daily limit. Upgrade for unlimited exercises!`
                     }
                   </p>
                   <ul className="space-y-1.5">
@@ -435,14 +591,14 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
             {!isLoadingExercises && exerciseError && (
               <div className="text-sm text-red-600">{exerciseError}</div>
             )}
-            {!isLoadingExercises && !exerciseError && exercises.map((exercise, index) => {
-              const isLocked = !isPremium && index >= freeLimit;
+              {!isLoadingExercises && !exerciseError && exercises.map((exercise, index) => {
+                const isLocked = !isPremium && freeRemaining === 0;
               return (
                 <ExerciseCard
                   key={exercise.id}
                   exercise={exercise}
-                  onClick={() => isLocked ? onUpgrade() : handleExerciseClick(exercise)}
-                  index={index}
+                    onClick={() => isLocked ? onUpgrade() : handleExerciseClick(exercise)}
+                    index={index}
                   isLocked={isLocked}
                 />
               );

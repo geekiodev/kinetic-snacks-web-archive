@@ -104,14 +104,16 @@ function App() {
       setIsAuthReady(true);
     };
 
-    const loadStoredSessionUser = () => {
+    const loadStoredSession = () => {
       try {
         const stored = window.localStorage.getItem(supabase.auth.storageKey);
         if (!stored) return null;
         const parsed = JSON.parse(stored) as {
+          access_token?: string;
+          refresh_token?: string;
           user?: { id: string; email?: string; user_metadata?: { name?: string } };
         };
-        return parsed.user ?? null;
+        return parsed;
       } catch {
         return null;
       }
@@ -145,9 +147,17 @@ function App() {
 
     const bootstrapFromStorage = async (attempts = 5, intervalMs = 400) => {
       for (let i = 0; i < attempts; i += 1) {
-        const storedUser = loadStoredSessionUser();
-        if (storedUser?.email) {
-          const hasProfile = await handleSessionUser(storedUser);
+        const storedSession = loadStoredSession();
+        if (storedSession?.user?.email) {
+          const { data } = await supabase.auth.getSession();
+          if (!data.session && storedSession.access_token && storedSession.refresh_token) {
+            await supabase.auth.setSession({
+              access_token: storedSession.access_token,
+              refresh_token: storedSession.refresh_token,
+            });
+          }
+
+          const hasProfile = await handleSessionUser(storedSession.user);
           if (!isMounted) return;
           setCurrentView(hasProfile ? 'dashboard' : 'onboarding');
           markAuthReady();
@@ -183,17 +193,20 @@ function App() {
       checks += 1;
 
       try {
-        const stored = window.localStorage.getItem(supabase.auth.storageKey);
-        if (stored) {
-          const parsed = JSON.parse(stored) as {
-            user?: { id: string; email?: string; user_metadata?: { name?: string } };
-          };
-          if (parsed.user?.email) {
-            const hasProfile = await handleSessionUser(parsed.user);
+        const storedSession = loadStoredSession();
+        if (storedSession?.user?.email) {
+          const { data } = await supabase.auth.getSession();
+          if (!data.session && storedSession.access_token && storedSession.refresh_token) {
+            await supabase.auth.setSession({
+              access_token: storedSession.access_token,
+              refresh_token: storedSession.refresh_token,
+            });
+          }
+
+          const hasProfile = await handleSessionUser(storedSession.user);
             if (!isActive) return;
             setCurrentView(hasProfile ? 'dashboard' : 'onboarding');
             return;
-          }
         }
       } catch {
         // ignore parse errors
@@ -338,22 +351,32 @@ function App() {
       )}
 
       {currentView === 'settings' && (
-        <Settings
-          preferences={userPreferences}
-          user={user}
-          onSave={(prefs) => {
-            setUserPreferences(prefs);
-            if (user) {
-              void supabase.from('profiles').update({
-                preferences: prefs,
-                updated_at: new Date().toISOString(),
-              }).eq('id', user.id);
-            }
-            setCurrentView('dashboard');
-          }}
-          onSignOut={handleSignOut}
-          onBack={() => setCurrentView('dashboard')}
-        />
+      <Settings
+        preferences={userPreferences}
+        user={user}
+        onSave={async (prefs) => {
+          setProfileLoadError(null);
+          if (!user) {
+            setProfileLoadError('Please sign in again to save your preferences.');
+            return;
+          }
+
+          const { error } = await supabase.from('profiles').update({
+            preferences: prefs,
+            updated_at: new Date().toISOString(),
+          }).eq('id', user.id);
+
+          if (error) {
+            setProfileLoadError(error.message);
+            return;
+          }
+
+          setUserPreferences(prefs);
+          setCurrentView('dashboard');
+        }}
+        onSignOut={handleSignOut}
+        onBack={() => setCurrentView('dashboard')}
+      />
       )}
 
       {currentView === 'space-analysis' && (
