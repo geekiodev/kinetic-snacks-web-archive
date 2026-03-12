@@ -188,10 +188,7 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
                         key={limitation}
                         type="button"
                         aria-pressed={isSelected}
-                        onPointerDown={(event) => {
-                          event.stopPropagation();
-                          toggle();
-                        }}
+                        onClick={toggle}
                         className={`touch-target p-3 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
                           isSelected
                             ? 'border-orange-500 bg-orange-50 text-orange-900'
@@ -234,10 +231,7 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
                       key={equipment}
                       type="button"
                       aria-pressed={isSelected}
-                      onPointerDown={(event) => {
-                        event.stopPropagation();
-                        toggle();
-                      }}
+                      onClick={toggle}
                       className={`touch-target p-3 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
                         isSelected
                           ? 'border-orange-500 bg-orange-50 text-orange-900'
@@ -276,10 +270,7 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
                       key={location}
                       type="button"
                       aria-pressed={isSelected}
-                      onPointerDown={(event) => {
-                        event.stopPropagation();
-                        toggle();
-                      }}
+                      onClick={toggle}
                       className={`touch-target p-3 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
                         isSelected
                           ? 'border-orange-500 bg-orange-50 text-orange-900'
@@ -343,10 +334,7 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
                           key={intensity.value}
                           type="button"
                           aria-pressed={isSelected}
-                          onPointerDown={(event) => {
-                            event.stopPropagation();
-                            choose();
-                          }}
+                          onClick={choose}
                           className={`touch-target p-3 sm:p-4 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left ${
                             isSelected
                               ? 'border-orange-500 bg-orange-50'

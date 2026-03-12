@@ -85,10 +85,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                         key={limitation}
                         type="button"
                         aria-pressed={isSelected}
-                        onPointerDown={(event) => {
-                          event.stopPropagation();
-                          toggle();
-                        }}
+                        onClick={toggle}
                         className={`touch-target p-3 sm:p-3.5 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
                           isSelected
                             ? 'border-orange-500 bg-orange-50 text-orange-900'
@@ -139,10 +136,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                         key={equipment}
                         type="button"
                         aria-pressed={isSelected}
-                      onPointerDown={(event) => {
-                        event.stopPropagation();
-                        toggle();
-                      }}
+                      onClick={toggle}
                       className={`touch-target p-3 sm:p-3.5 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
                         isSelected
                           ? 'border-orange-500 bg-orange-50 text-orange-900'
@@ -189,10 +183,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                         key={location}
                         type="button"
                         aria-pressed={isSelected}
-                      onPointerDown={(event) => {
-                        event.stopPropagation();
-                        toggle();
-                      }}
+                      onClick={toggle}
                       className={`touch-target p-3 sm:p-3.5 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
                         isSelected
                           ? 'border-orange-500 bg-orange-50 text-orange-900'
@@ -262,10 +253,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                         key={intensity.value}
                         type="button"
                         aria-pressed={isSelected}
-                        onPointerDown={(event) => {
-                          event.stopPropagation();
-                          choose();
-                        }}
+                        onClick={choose}
                         className={`touch-target p-3 sm:p-4 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left ${
                           isSelected
                             ? 'border-orange-500 bg-orange-50'
