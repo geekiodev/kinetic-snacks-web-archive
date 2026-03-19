@@ -152,7 +152,7 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
       try {
         const { data, error } = await supabase
           .from('exercises')
-          .select('id,title,duration_minutes,intensity,equipment,instructions,tips,category,is_active')
+          .select('id,title,duration_minutes,intensity,equipment,instructions,tips,category,movement_tags,body_region_tags,context_tags,location_tags,contraindication_tags,requires_floor,standing_only,no_sweat,variation_key,is_active')
           .eq('is_active', true);
 
         if (error || !data) {
@@ -168,6 +168,15 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
           instructions: row.instructions ?? [],
           tips: row.tips ?? '',
           category: row.category ?? 'General',
+          movementTags: row.movement_tags ?? [],
+          bodyRegionTags: row.body_region_tags ?? [],
+          contextTags: row.context_tags ?? [],
+          locationTags: row.location_tags ?? [],
+          contraindicationTags: row.contraindication_tags ?? [],
+          requiresFloor: row.requires_floor ?? false,
+          standingOnly: row.standing_only ?? false,
+          noSweat: row.no_sweat ?? true,
+          variationKey: row.variation_key ?? undefined,
         })) as Exercise[];
 
         const limitationRules = await loadLimitationRules();

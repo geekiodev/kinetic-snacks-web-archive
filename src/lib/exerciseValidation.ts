@@ -59,7 +59,17 @@ const isEquipmentCompatible = (exerciseEquipment: string[], availableEquipment: 
   return exerciseEquipment.every((item) => available.has(normalize(item)));
 };
 
-const violatesLimitations = (
+const violatesContraindications = (candidate: Exercise, limitations: string[]) => {
+  const contraindications = new Set((candidate.contraindicationTags ?? []).map(normalize));
+  if (contraindications.size === 0) return false;
+
+  return limitations
+    .map(normalize)
+    .filter((limitation) => limitation !== 'none')
+    .some((limitation) => contraindications.has(limitation));
+};
+
+const violatesKeywordRules = (
   candidate: Exercise,
   limitations: string[],
   limitationRules: LimitationRuleMap
@@ -74,6 +84,8 @@ const violatesLimitations = (
     candidate.title,
     candidate.tips,
     candidate.category,
+    ...(candidate.movementTags ?? []),
+    ...(candidate.bodyRegionTags ?? []),
     ...candidate.instructions,
   ]
     .filter(Boolean)
@@ -93,7 +105,11 @@ export const validateExerciseCandidate = (
   }
 
   if (preferences.limitations.length > 0 && !preferences.limitations.includes('None')) {
-    if (violatesLimitations(candidate, preferences.limitations, limitationRules)) {
+    if (violatesContraindications(candidate, preferences.limitations)) {
+      return { valid: false, reason: 'Conflicts with limitations' };
+    }
+
+    if (violatesKeywordRules(candidate, preferences.limitations, limitationRules)) {
       return { valid: false, reason: 'Conflicts with limitations' };
     }
   }

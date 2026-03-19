@@ -37,6 +37,15 @@ export interface Exercise {
   tips: string;
   scheduledTime?: string;
   category: string;
+  movementTags?: string[];
+  bodyRegionTags?: string[];
+  contextTags?: string[];
+  locationTags?: string[];
+  contraindicationTags?: string[];
+  requiresFloor?: boolean;
+  standingOnly?: boolean;
+  noSweat?: boolean;
+  variationKey?: string;
 }
 
 function App() {

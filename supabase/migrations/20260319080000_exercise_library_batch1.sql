@@ -1,6 +1,19 @@
--- Seed data for exercises
+-- Add richer exercise metadata for ranking and seeding
+alter table public.exercises
+  add column if not exists movement_tags text[] not null default '{}',
+  add column if not exists body_region_tags text[] not null default '{}',
+  add column if not exists context_tags text[] not null default '{}',
+  add column if not exists location_tags text[] not null default '{}',
+  add column if not exists contraindication_tags text[] not null default '{}',
+  add column if not exists requires_floor boolean not null default false,
+  add column if not exists standing_only boolean not null default false,
+  add column if not exists no_sweat boolean not null default true,
+  add column if not exists variation_key text;
 
+-- Seed the first curated library batch aligned with the taxonomy brief
 insert into public.exercises (title, duration_minutes, intensity, equipment, instructions, tips, category, movement_tags, body_region_tags, context_tags, location_tags, contraindication_tags, requires_floor, standing_only, no_sweat, variation_key)
+select *
+from (
 values
   (
     'Desk-Side Stretching Sequence',
@@ -937,4 +950,8 @@ values
     true,
     false,
     'countertop-plank'
-  );
+  )
+) as seed (title, duration_minutes, intensity, equipment, instructions, tips, category, movement_tags, body_region_tags, context_tags, location_tags, contraindication_tags, requires_floor, standing_only, no_sweat, variation_key)
+where not exists (
+  select 1 from public.exercises existing where existing.title = seed.title
+);
