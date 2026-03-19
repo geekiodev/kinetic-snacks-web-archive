@@ -41,6 +41,14 @@ describe('validateExerciseCandidate', () => {
     expect(result.reason).toBe('Conflicts with limitations');
   });
 
+  it('rejects when explicit contraindication tags match the user limitations', () => {
+    const candidate = { ...baseExercise, contraindicationTags: ['Knee Issues'] };
+    const prefs = { ...basePreferences, limitations: ['Knee Issues'] };
+    const result = validateExerciseCandidate(candidate, prefs, rules);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe('Conflicts with limitations');
+  });
+
   it('rejects when intensity mismatches', () => {
     const candidate = { ...baseExercise, intensity: 'medium' };
     const result = validateExerciseCandidate(candidate, basePreferences, rules);
