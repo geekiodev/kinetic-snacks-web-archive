@@ -176,24 +176,29 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
               </h2>
               <div className="grid sm:grid-cols-2 gap-2.5 sm:gap-3">
                 {['Knee Issues', 'Back Pain', 'Shoulder Injury', 'Wrist Problems', 'Ankle Issues', 'Hip Pain', 'None'].map(
-                  (limitation) => (
-                    <button
-                      key={limitation}
-                      onClick={() =>
-                        setLocalPreferences({
-                          ...localPreferences,
-                          limitations: toggleArrayItem(localPreferences.limitations, limitation),
-                        })
-                      }
-                      className={`touch-target p-3 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
-                        localPreferences.limitations.includes(limitation)
-                          ? 'border-orange-500 bg-orange-50 text-orange-900'
-                          : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
-                      }`}
-                    >
-                      {limitation}
-                    </button>
-                  )
+                  (limitation) => {
+                    const isSelected = localPreferences.limitations.includes(limitation);
+                    const toggle = () =>
+                      setLocalPreferences((prev) => ({
+                        ...prev,
+                        limitations: toggleArrayItem(prev.limitations, limitation),
+                      }));
+                    return (
+                      <button
+                        key={limitation}
+                        type="button"
+                        aria-pressed={isSelected}
+                        onClick={toggle}
+                        className={`touch-target p-3 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
+                          isSelected
+                            ? 'border-orange-500 bg-orange-50 text-orange-900'
+                            : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
+                        }`}
+                      >
+                        {limitation}
+                      </button>
+                    );
+                  }
                 )}
               </div>
             </section>
@@ -214,24 +219,29 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
                   'Wall Space',
                   'Floor Space',
                   'None / Bodyweight Only',
-                ].map((equipment) => (
-                  <button
-                    key={equipment}
-                    onClick={() =>
-                      setLocalPreferences({
-                        ...localPreferences,
-                        equipment: toggleArrayItem(localPreferences.equipment, equipment),
-                      })
-                    }
-                    className={`touch-target p-3 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
-                      localPreferences.equipment.includes(equipment)
-                        ? 'border-orange-500 bg-orange-50 text-orange-900'
-                        : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
-                    }`}
-                  >
-                    {equipment}
-                  </button>
-                ))}
+                ].map((equipment) => {
+                  const isSelected = localPreferences.equipment.includes(equipment);
+                  const toggle = () =>
+                    setLocalPreferences((prev) => ({
+                      ...prev,
+                      equipment: toggleArrayItem(prev.equipment, equipment),
+                    }));
+                  return (
+                    <button
+                      key={equipment}
+                      type="button"
+                      aria-pressed={isSelected}
+                      onClick={toggle}
+                      className={`touch-target p-3 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
+                        isSelected
+                          ? 'border-orange-500 bg-orange-50 text-orange-900'
+                          : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
+                      }`}
+                    >
+                      {equipment}
+                    </button>
+                  );
+                })}
               </div>
             </section>
 
@@ -248,24 +258,29 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
                   'Bedroom',
                   'Outdoor Space',
                   'Gym',
-                ].map((location) => (
-                  <button
-                    key={location}
-                    onClick={() =>
-                      setLocalPreferences({
-                        ...localPreferences,
-                        location: toggleArrayItem(localPreferences.location, location),
-                      })
-                    }
-                    className={`touch-target p-3 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
-                      localPreferences.location.includes(location)
-                        ? 'border-orange-500 bg-orange-50 text-orange-900'
-                        : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
-                    }`}
-                  >
-                    {location}
-                  </button>
-                ))}
+                ].map((location) => {
+                  const isSelected = localPreferences.location.includes(location);
+                  const toggle = () =>
+                    setLocalPreferences((prev) => ({
+                      ...prev,
+                      location: toggleArrayItem(prev.location, location),
+                    }));
+                  return (
+                    <button
+                      key={location}
+                      type="button"
+                      aria-pressed={isSelected}
+                      onClick={toggle}
+                      className={`touch-target p-3 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
+                        isSelected
+                          ? 'border-orange-500 bg-orange-50 text-orange-900'
+                          : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
+                      }`}
+                    >
+                      {location}
+                    </button>
+                  );
+                })}
               </div>
             </section>
 
@@ -307,25 +322,30 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
                     {[
                       { value: 'low', label: 'Low', desc: 'Gentle, no sweat' },
                       { value: 'medium', label: 'Medium', desc: 'Light workout' },
-                    ].map((intensity) => (
-                      <button
-                        key={intensity.value}
-                        onClick={() =>
-                          setLocalPreferences({
-                            ...localPreferences,
-                            intensityLevel: intensity.value,
-                          })
-                        }
-                        className={`touch-target p-3 sm:p-4 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left ${
-                          localPreferences.intensityLevel === intensity.value
-                            ? 'border-orange-500 bg-orange-50'
-                            : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
-                        }`}
-                      >
-                        <div className="font-semibold text-slate-900 text-sm">{intensity.label}</div>
-                        <div className="text-xs sm:text-sm text-slate-600">{intensity.desc}</div>
-                      </button>
-                    ))}
+                    ].map((intensity) => {
+                      const isSelected = localPreferences.intensityLevel === intensity.value;
+                      const choose = () =>
+                        setLocalPreferences((prev) => ({
+                          ...prev,
+                          intensityLevel: intensity.value,
+                        }));
+                      return (
+                        <button
+                          key={intensity.value}
+                          type="button"
+                          aria-pressed={isSelected}
+                          onClick={choose}
+                          className={`touch-target p-3 sm:p-4 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left ${
+                            isSelected
+                              ? 'border-orange-500 bg-orange-50'
+                              : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
+                          }`}
+                        >
+                          <div className="font-semibold text-slate-900 text-sm">{intensity.label}</div>
+                          <div className="text-xs sm:text-sm text-slate-600">{intensity.desc}</div>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>

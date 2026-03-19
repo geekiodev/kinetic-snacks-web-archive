@@ -73,24 +73,29 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
               <div className="grid sm:grid-cols-2 gap-2.5 sm:gap-3">
                 {['Knee Issues', 'Back Pain', 'Shoulder Injury', 'Wrist Problems', 'Ankle Issues', 'Hip Pain', 'None'].map(
-                  (limitation) => (
-                    <button
-                      key={limitation}
-                      onClick={() =>
-                        setPreferences({
-                          ...preferences,
-                          limitations: toggleArrayItem(preferences.limitations, limitation),
-                        })
-                      }
-                      className={`touch-target p-3 sm:p-3.5 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
-                        preferences.limitations.includes(limitation)
-                          ? 'border-orange-500 bg-orange-50 text-orange-900'
-                          : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
-                      }`}
-                    >
-                      {limitation}
-                    </button>
-                  )
+                  (limitation) => {
+                    const isSelected = preferences.limitations.includes(limitation);
+                    const toggle = () =>
+                      setPreferences((prev) => ({
+                        ...prev,
+                        limitations: toggleArrayItem(prev.limitations, limitation),
+                      }));
+                    return (
+                      <button
+                        key={limitation}
+                        type="button"
+                        aria-pressed={isSelected}
+                        onClick={toggle}
+                        className={`touch-target p-3 sm:p-3.5 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
+                          isSelected
+                            ? 'border-orange-500 bg-orange-50 text-orange-900'
+                            : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
+                        }`}
+                      >
+                        {limitation}
+                      </button>
+                    );
+                  }
                 )}
               </div>
             </div>
@@ -119,24 +124,29 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   'Wall Space',
                   'Floor Space',
                   'None / Bodyweight Only',
-                ].map((equipment) => (
-                  <button
-                    key={equipment}
-                    onClick={() =>
-                      setPreferences({
-                        ...preferences,
-                        equipment: toggleArrayItem(preferences.equipment, equipment),
-                      })
-                    }
-                    className={`touch-target p-3 sm:p-3.5 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
-                      preferences.equipment.includes(equipment)
-                        ? 'border-orange-500 bg-orange-50 text-orange-900'
-                        : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
-                    }`}
-                  >
-                    {equipment}
-                  </button>
-                ))}
+                ].map((equipment) => {
+                  const isSelected = preferences.equipment.includes(equipment);
+                  const toggle = () =>
+                    setPreferences((prev) => ({
+                      ...prev,
+                      equipment: toggleArrayItem(prev.equipment, equipment),
+                    }));
+                    return (
+                    <button
+                        key={equipment}
+                        type="button"
+                        aria-pressed={isSelected}
+                      onClick={toggle}
+                      className={`touch-target p-3 sm:p-3.5 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
+                        isSelected
+                          ? 'border-orange-500 bg-orange-50 text-orange-900'
+                          : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
+                      }`}
+                    >
+                      {equipment}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -161,24 +171,29 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   'Bedroom',
                   'Outdoor Space',
                   'Gym',
-                ].map((location) => (
-                  <button
-                    key={location}
-                    onClick={() =>
-                      setPreferences({
-                        ...preferences,
-                        location: toggleArrayItem(preferences.location, location),
-                      })
-                    }
-                    className={`touch-target p-3 sm:p-3.5 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
-                      preferences.location.includes(location)
-                        ? 'border-orange-500 bg-orange-50 text-orange-900'
-                        : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
-                    }`}
-                  >
-                    {location}
-                  </button>
-                ))}
+                ].map((location) => {
+                  const isSelected = preferences.location.includes(location);
+                  const toggle = () =>
+                    setPreferences((prev) => ({
+                      ...prev,
+                      location: toggleArrayItem(prev.location, location),
+                    }));
+                    return (
+                    <button
+                        key={location}
+                        type="button"
+                        aria-pressed={isSelected}
+                      onClick={toggle}
+                      className={`touch-target p-3 sm:p-3.5 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
+                        isSelected
+                          ? 'border-orange-500 bg-orange-50 text-orange-900'
+                          : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
+                      }`}
+                    >
+                      {location}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -226,25 +241,30 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   {[
                     { value: 'low', label: 'Low', desc: 'Gentle, no sweat' },
                     { value: 'medium', label: 'Medium', desc: 'Light workout' },
-                  ].map((intensity) => (
-                    <button
-                      key={intensity.value}
-                      onClick={() =>
-                        setPreferences({
-                          ...preferences,
-                          intensityLevel: intensity.value,
-                        })
-                      }
-                      className={`touch-target p-3 sm:p-4 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left ${
-                        preferences.intensityLevel === intensity.value
-                          ? 'border-orange-500 bg-orange-50'
-                          : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
-                      }`}
-                    >
-                      <div className="font-semibold text-slate-900 text-sm">{intensity.label}</div>
-                      <div className="text-xs sm:text-sm text-slate-600">{intensity.desc}</div>
-                    </button>
-                  ))}
+                  ].map((intensity) => {
+                    const isSelected = preferences.intensityLevel === intensity.value;
+                    const choose = () =>
+                      setPreferences((prev) => ({
+                        ...prev,
+                        intensityLevel: intensity.value,
+                      }));
+                    return (
+                      <button
+                        key={intensity.value}
+                        type="button"
+                        aria-pressed={isSelected}
+                        onClick={choose}
+                        className={`touch-target p-3 sm:p-4 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left ${
+                          isSelected
+                            ? 'border-orange-500 bg-orange-50'
+                            : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
+                        }`}
+                      >
+                        <div className="font-semibold text-slate-900 text-sm">{intensity.label}</div>
+                        <div className="text-xs sm:text-sm text-slate-600">{intensity.desc}</div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>

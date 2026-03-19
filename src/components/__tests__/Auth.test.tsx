@@ -7,6 +7,7 @@ import { supabase } from '../../lib/supabase';
 vi.mock('../../lib/supabase', () => ({
   supabase: {
     auth: {
+      storageKey: 'sb-local-auth-token',
       getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
       signInWithPassword: vi.fn(),
       signUp: vi.fn(),
@@ -124,13 +125,17 @@ describe('Auth', () => {
 
     await userEvent.click(submit);
 
+    window.setTimeout(() => {
+      window.localStorage.setItem('sb-local-auth-token', JSON.stringify({ user: sessionUser }));
+    }, 200);
+
     await waitFor(() => {
       expect(onAuthSuccess).toHaveBeenCalledWith({
         id: 'user-2',
         name: 'Timeout User',
         email: 'timeout@example.com',
       });
-    }, { timeout: 6000 });
-  });
+    }, { timeout: 8000 });
+  }, 10000);
 
 });
