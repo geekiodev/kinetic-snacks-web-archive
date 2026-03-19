@@ -51,6 +51,7 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
     { id: 'account' as SettingsTab, label: 'Account', icon: HelpCircle },
   ];
 
+
   return (
     <div className="min-h-screen bg-stone-50 smooth-scroll safe-bottom">
       {/* Header */}
@@ -188,11 +189,14 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
                         key={limitation}
                         type="button"
                         aria-pressed={isSelected}
-                        onClick={toggle}
-                        className={`touch-target p-3 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
+                        onClick={(event) => {
+                          toggle();
+                          event.currentTarget.blur();
+                        }}
+                        className={`touch-target p-3 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium chip-hover ${
                           isSelected
                             ? 'border-orange-500 bg-orange-50 text-orange-900'
-                            : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
+                            : 'border-stone-200'
                         }`}
                       >
                         {limitation}
@@ -231,11 +235,14 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
                       key={equipment}
                       type="button"
                       aria-pressed={isSelected}
-                      onClick={toggle}
-                      className={`touch-target p-3 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
+                      onClick={(event) => {
+                        toggle();
+                        event.currentTarget.blur();
+                      }}
+                      className={`touch-target p-3 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium chip-hover ${
                         isSelected
                           ? 'border-orange-500 bg-orange-50 text-orange-900'
-                          : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
+                          : 'border-stone-200'
                       }`}
                     >
                       {equipment}
@@ -270,11 +277,14 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
                       key={location}
                       type="button"
                       aria-pressed={isSelected}
-                      onClick={toggle}
-                      className={`touch-target p-3 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium ${
+                      onClick={(event) => {
+                        toggle();
+                        event.currentTarget.blur();
+                      }}
+                      className={`touch-target p-3 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left text-sm font-medium chip-hover ${
                         isSelected
                           ? 'border-orange-500 bg-orange-50 text-orange-900'
-                          : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
+                          : 'border-stone-200'
                       }`}
                     >
                       {location}
@@ -334,11 +344,14 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
                           key={intensity.value}
                           type="button"
                           aria-pressed={isSelected}
-                          onClick={choose}
-                          className={`touch-target p-3 sm:p-4 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left ${
+                          onClick={(event) => {
+                            choose();
+                            event.currentTarget.blur();
+                          }}
+                          className={`touch-target p-3 sm:p-4 rounded-lg sm:rounded-xl border-2 transition-all active:scale-95 text-left chip-hover ${
                             isSelected
                               ? 'border-orange-500 bg-orange-50'
-                              : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'
+                              : 'border-stone-200'
                           }`}
                         >
                           <div className="font-semibold text-slate-900 text-sm">{intensity.label}</div>

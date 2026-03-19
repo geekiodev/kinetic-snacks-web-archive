@@ -93,6 +93,12 @@
   .hide-scrollbar::-webkit-scrollbar {
     display: none;
   }
+
+  @media (hover: hover) {
+    .chip-hover:hover {
+      @apply border-orange-300 bg-orange-50;
+    }
+  }
 }
 
 @keyframes slideUp {
