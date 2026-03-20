@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Dashboard from '../Dashboard';
 import { generateExercises, rankExercises } from '../../lib/exerciseGenerator';
+
 const mockedState = vi.hoisted(() => ({
   exerciseRows: [] as Array<Record<string, unknown>>,
   generatedExercise: {
