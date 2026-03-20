@@ -50,7 +50,7 @@ describe('validateExerciseCandidate', () => {
   });
 
   it('rejects when intensity mismatches', () => {
-    const candidate = { ...baseExercise, intensity: 'medium' };
+    const candidate: Exercise = { ...baseExercise, intensity: 'medium' };
     const result = validateExerciseCandidate(candidate, basePreferences, rules);
     expect(result.valid).toBe(false);
     expect(result.reason).toBe('Intensity mismatch');

@@ -5,7 +5,6 @@ import {
   Shuffle,
   Settings,
   Camera,
-  TrendingUp,
   Zap,
   Flame,
   Award,
@@ -36,6 +35,8 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
   const [todayCount, setTodayCount] = useState(0);
   const [weeklyCount, setWeeklyCount] = useState(0);
   const [weeklyMinutes, setWeeklyMinutes] = useState(0);
+  const [hasLoadedStats, setHasLoadedStats] = useState(false);
+  const [recentCompletions, setRecentCompletions] = useState<Array<{ exerciseId: string; completedAt: string }>>([]);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [isLoadingExercises, setIsLoadingExercises] = useState(false);
   const [exerciseError, setExerciseError] = useState('');
@@ -51,17 +52,21 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
 
   useEffect(() => {
     const loadStats = async () => {
+      setHasLoadedStats(false);
+
       if (!userId) {
         setCurrentStreak(0);
         setTodayCount(0);
         setWeeklyCount(0);
         setWeeklyMinutes(0);
+        setRecentCompletions([]);
+        setHasLoadedStats(true);
         return;
       }
 
       const { data, error } = await supabase
         .from('exercise_completions')
-        .select('completed_at, duration_minutes')
+        .select('exercise_id, completed_at, duration_minutes')
         .eq('user_id', userId)
         .gte('completed_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
 
@@ -70,6 +75,8 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
         setTodayCount(0);
         setWeeklyCount(0);
         setWeeklyMinutes(0);
+        setRecentCompletions([]);
+        setHasLoadedStats(true);
         return;
       }
 
@@ -100,6 +107,21 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
       setTodayCount(dayCounts.get(todayKey) || 0);
       setWeeklyCount(weeklyTotal);
       setWeeklyMinutes(weeklyDuration);
+      const nextRecentCompletions = data.map((entry) => ({ exerciseId: entry.exercise_id, completedAt: entry.completed_at }));
+      setRecentCompletions((current) => {
+        if (
+          current.length === nextRecentCompletions.length &&
+          current.every(
+            (entry, index) =>
+              entry.exerciseId === nextRecentCompletions[index]?.exerciseId &&
+              entry.completedAt === nextRecentCompletions[index]?.completedAt
+          )
+        ) {
+          return current;
+        }
+
+        return nextRecentCompletions;
+      });
 
       let streak = 0;
       const cursor = new Date();
@@ -114,9 +136,10 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
         }
       }
       setCurrentStreak(streak);
+      setHasLoadedStats(true);
     };
 
-    loadStats();
+    void loadStats();
   }, [userId]);
 
   useEffect(() => {
@@ -148,49 +171,81 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
 
   useEffect(() => {
     const loadExercises = async () => {
+      if (!hasLoadedStats) {
+        return;
+      }
+
       setIsLoadingExercises(true);
       setExerciseError('');
       try {
         const { data, error } = await supabase
           .from('exercises')
-          .select('id,title,duration_minutes,intensity,equipment,instructions,tips,category,movement_tags,body_region_tags,context_tags,location_tags,contraindication_tags,requires_floor,standing_only,no_sweat,variation_key,is_active')
+          .select('id,title,duration_minutes,intensity,equipment,instructions,tips,category,movement_tags,body_region_tags,context_tags,location_tags,contraindication_tags,requires_floor,standing_only,no_sweat,variation_key,source_type,review_status,is_active')
           .eq('is_active', true);
 
         if (error || !data) {
           throw new Error(error?.message || 'Failed to load exercises');
         }
 
-        const mapped = data.map((row) => ({
-          id: row.id,
-          title: row.title,
-          duration: row.duration_minutes,
-          intensity: row.intensity === 'high' ? 'medium' : row.intensity,
-          equipment: row.equipment ?? [],
-          instructions: row.instructions ?? [],
-          tips: row.tips ?? '',
-          category: row.category ?? 'General',
-          movementTags: row.movement_tags ?? [],
-          bodyRegionTags: row.body_region_tags ?? [],
-          contextTags: row.context_tags ?? [],
-          locationTags: row.location_tags ?? [],
-          contraindicationTags: row.contraindication_tags ?? [],
-          requiresFloor: row.requires_floor ?? false,
-          standingOnly: row.standing_only ?? false,
-          noSweat: row.no_sweat ?? true,
-          variationKey: row.variation_key ?? undefined,
-        })) as Exercise[];
+        const mapped = data
+          .filter((row) => (row.review_status ?? 'approved') === 'approved')
+          .map((row) => ({
+            id: row.id,
+            title: row.title,
+            duration: row.duration_minutes,
+            intensity: row.intensity === 'high' ? 'medium' : row.intensity,
+            equipment: row.equipment ?? [],
+            instructions: row.instructions ?? [],
+            tips: row.tips ?? '',
+            category: row.category ?? 'General',
+            movementTags: row.movement_tags ?? [],
+            bodyRegionTags: row.body_region_tags ?? [],
+            contextTags: row.context_tags ?? [],
+            locationTags: row.location_tags ?? [],
+            contraindicationTags: row.contraindication_tags ?? [],
+            requiresFloor: row.requires_floor ?? false,
+            standingOnly: row.standing_only ?? false,
+            noSweat: row.no_sweat ?? true,
+            variationKey: row.variation_key ?? undefined,
+            sourceType: row.source_type ?? 'curated_seed',
+            reviewStatus: row.review_status ?? 'approved',
+          })) as Exercise[];
 
         const limitationRules = await loadLimitationRules();
         const filtered = mapped.filter((exercise) =>
           validateExerciseCandidate(exercise, userPreferences, limitationRules).valid
         );
-        const ranked = rankExercises({ preferences: userPreferences, exercises: filtered });
+        const recentExerciseIds = recentCompletions.map((entry) => entry.exerciseId);
+        const recentVariationKeys = filtered
+          .filter((exercise) => recentExerciseIds.includes(exercise.id))
+          .map((exercise) => exercise.variationKey)
+          .filter((variationKey): variationKey is string => Boolean(variationKey));
+        const categoryCounts = filtered
+          .filter((exercise) => recentExerciseIds.includes(exercise.id))
+          .reduce<Record<string, number>>((acc, exercise) => {
+            acc[exercise.category] = (acc[exercise.category] || 0) + 1;
+            return acc;
+          }, {});
+        const ranked = rankExercises({
+          preferences: userPreferences,
+          exercises: filtered,
+          history: {
+            recentExerciseIds,
+            recentVariationKeys,
+            categoryCounts,
+          },
+        });
 
         const minCount = 3;
         if (ranked.length < minCount) {
           const generated = await generateExercises({
             preferences: userPreferences,
             count: minCount - ranked.length,
+            history: {
+              recentExerciseIds,
+              recentVariationKeys,
+              categoryCounts,
+            },
           });
           const validatedGenerated = generated.filter((exercise) =>
             validateExerciseCandidate(exercise, userPreferences, limitationRules).valid
@@ -210,7 +265,17 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
               }))
             );
           }
-          setExercises(rankExercises({ preferences: userPreferences, exercises: [...ranked, ...validatedGenerated] }));
+          setExercises(
+            rankExercises({
+              preferences: userPreferences,
+              exercises: [...ranked, ...validatedGenerated],
+              history: {
+                recentExerciseIds,
+                recentVariationKeys,
+                categoryCounts,
+              },
+            })
+          );
           return;
         }
 
@@ -224,8 +289,8 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
       }
     };
 
-    loadExercises();
-  }, [userPreferences]);
+    void loadExercises();
+  }, [hasLoadedStats, userPreferences, recentCompletions]);
 
   const ensureSession = async (attempts = 2, delayMs = 300) => {
     for (let i = 0; i < attempts; i += 1) {
@@ -724,6 +789,19 @@ function ExerciseCard({ exercise, onClick, index, isLocked }: ExerciseCardProps)
           <p className="text-xs sm:text-sm text-slate-600 leading-relaxed line-clamp-2 sm:line-clamp-none">
             {exercise.tips}
           </p>
+
+          {exercise.fitReasons && exercise.fitReasons.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {exercise.fitReasons.map((reason) => (
+                <span
+                  key={reason}
+                  className="px-2.5 py-1 rounded-full bg-stone-100 text-slate-700 text-[11px] sm:text-xs font-medium border border-stone-200"
+                >
+                  {reason}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

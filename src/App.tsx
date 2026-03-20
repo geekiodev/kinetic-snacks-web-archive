@@ -46,6 +46,9 @@ export interface Exercise {
   standingOnly?: boolean;
   noSweat?: boolean;
   variationKey?: string;
+  fitReasons?: string[];
+  sourceType?: 'curated_seed' | 'generated_template' | 'reviewed_generated';
+  reviewStatus?: 'approved' | 'pending' | 'rejected';
 }
 
 function App() {
@@ -55,7 +58,7 @@ function App() {
   const [subscriptionPlan, setSubscriptionPlan] = useState<SubscriptionPlan>('free');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
-  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [, setIsAuthReady] = useState(false);
   const authReadyRef = useRef(false);
   const [userPreferences, setUserPreferences] = useState<UserPreferences>({
     limitations: [],

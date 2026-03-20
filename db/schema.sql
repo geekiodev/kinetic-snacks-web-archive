@@ -90,6 +90,11 @@ create table if not exists public.exercises (
   standing_only boolean not null default false,
   no_sweat boolean not null default true,
   variation_key text,
+  source_type text not null default 'curated_seed' check (source_type in ('curated_seed', 'generated_template', 'reviewed_generated')),
+  review_status text not null default 'approved' check (review_status in ('approved', 'pending', 'rejected')),
+  reviewed_at timestamp with time zone,
+  reviewed_by text,
+  review_notes text,
   is_active boolean not null default true,
   created_at timestamp with time zone default now(),
   updated_at timestamp with time zone default now()
