@@ -1,4 +1,4 @@
-import { ArrowLeft, Upload, Camera, Sparkles, AlertCircle, Crown } from 'lucide-react';
+import { ArrowLeft, Camera, Sparkles, AlertCircle, Crown } from 'lucide-react';
 import { useState } from 'react';
 
 interface SpaceAnalysisProps {
