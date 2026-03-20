@@ -283,7 +283,7 @@ export const rankExercises = ({ preferences, exercises, history }: RankExercises
 
     const categoryKey = normalize(exercise.category);
     const variationKey = normalize(exercise.variationKey ?? exercise.title);
-  total += Math.min(3, (historyCategoryCounts.get(categoryKey) ?? 0) * 0.75);
+    total += Math.min(3, (historyCategoryCounts.get(categoryKey) ?? 0) * 0.75);
 
     if (recentExerciseIds.has(normalize(exercise.id))) {
       total -= 5;
