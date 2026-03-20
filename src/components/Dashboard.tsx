@@ -126,19 +126,20 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
         return;
       }
 
-      const dayKey = new Date().toISOString().slice(0, 10);
-      const { count, error } = await supabase
-        .from('exercise_views')
-        .select('exercise_id', { head: true, count: 'exact' })
-        .eq('user_id', userId)
-        .eq('day_key', dayKey);
+      const { data, error } = await supabase.functions.invoke('allow-exercise-view', {
+        body: { peek: true },
+      });
 
-      if (error) {
+      if (error || !data) {
         setFreeRemaining(null);
         return;
       }
 
-      const remaining = Math.max(0, freeLimit - (count ?? 0));
+      const limit = Number(data.limit);
+      const remaining = data.remaining === null ? null : Number(data.remaining);
+      if (Number.isFinite(limit)) {
+        setFreeLimit(limit);
+      }
       setFreeRemaining(remaining);
     };
 
