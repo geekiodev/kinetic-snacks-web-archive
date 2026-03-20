@@ -52,15 +52,16 @@ Deno.serve(async (req) => {
     });
   }
 
-  let payload: { exercise_id?: string } = {};
+  let payload: { exercise_id?: string; peek?: boolean } = {};
   try {
     payload = await req.json();
   } catch {
     return jsonResponse(400, { error: 'Invalid JSON body.' });
   }
 
+  const isPeek = payload.peek === true;
   const exerciseId = payload.exercise_id;
-  if (!exerciseId) {
+  if (!isPeek && !exerciseId) {
     return jsonResponse(400, { error: 'exercise_id is required.' });
   }
 
@@ -87,6 +88,13 @@ Deno.serve(async (req) => {
     return jsonResponse(500, { error: countError.message });
   }
 
+  const currentCount = totalCount ?? 0;
+
+  if (isPeek) {
+    const remaining = Math.max(0, limit - currentCount);
+    return jsonResponse(200, { allowed: remaining > 0, remaining, limit });
+  }
+
   const { count: existingCount, error: existingError } = await supabase
     .from('exercise_views')
     .select('id', { head: true, count: 'exact' })
@@ -99,7 +107,6 @@ Deno.serve(async (req) => {
   }
 
   const alreadyViewed = (existingCount ?? 0) > 0;
-  const currentCount = totalCount ?? 0;
   const decision = computeUsageDecision({ limit, currentCount, alreadyViewed });
 
   if (!decision.allowed) {
