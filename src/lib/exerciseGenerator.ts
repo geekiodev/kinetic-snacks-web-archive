@@ -244,7 +244,7 @@ export const rankExercises = ({ preferences, exercises, history }: RankExercises
   const workContext = prefersWorkContext(locationPreferences);
   const recentExerciseIds = new Set((history?.recentExerciseIds ?? []).map(normalize));
   const recentVariationKeys = new Set((history?.recentVariationKeys ?? []).map(normalize));
-  const categoryCounts = new Map(
+  const historyCategoryCounts = new Map(
     Object.entries(history?.categoryCounts ?? {}).map(([category, count]) => [normalize(category), count])
   );
 
@@ -283,7 +283,7 @@ export const rankExercises = ({ preferences, exercises, history }: RankExercises
 
     const categoryKey = normalize(exercise.category);
     const variationKey = normalize(exercise.variationKey ?? exercise.title);
-    total += Math.min(3, (categoryCounts.get(categoryKey) ?? 0) * 0.75);
+  total += Math.min(3, (historyCategoryCounts.get(categoryKey) ?? 0) * 0.75);
 
     if (recentExerciseIds.has(normalize(exercise.id))) {
       total -= 5;
@@ -292,7 +292,6 @@ export const rankExercises = ({ preferences, exercises, history }: RankExercises
     if (recentVariationKeys.has(variationKey)) {
       total -= 2;
     }
-
     return total;
   };
 

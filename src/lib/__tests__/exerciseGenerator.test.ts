@@ -59,9 +59,6 @@ describe('rankExercises', () => {
     expect(ranked[0].id).toBe('desk-reset');
   });
 
-
-
-
   it('adapts ranking using completion history by boosting familiar categories and avoiding exact repeats', () => {
     const ranked = rankExercises({
       preferences,
@@ -104,7 +101,6 @@ describe('rankExercises', () => {
     expect(ranked[0].id).toBe('new-mobility');
     expect(ranked[2].id).toBe('recent-mobility');
   });
-
   it('generates fallback exercises with fit reasons when the database pool is too small', async () => {
     const generated = await generateExercises({
       preferences,
