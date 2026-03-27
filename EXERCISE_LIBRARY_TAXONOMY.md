@@ -125,6 +125,8 @@ The exercise library should explicitly cover the equipment choices exposed in on
 - `Yoga Mat`
 - `Resistance Bands`
 - `Dumbbells`
+- `Kettlebells`
+- `Jump Rope`
 - `Countertop`
 - `Doorway Pull-up Bar`
 
@@ -186,6 +188,8 @@ Exercises may belong to more than one equipment-compatible cluster, but the auth
 | Yoga Mat | 10 |
 | Resistance Bands | 12 |
 | Dumbbells | 12 |
+| Kettlebells | 8 |
+| Jump Rope | 8 |
 | Countertop | 6 |
 | Doorway Pull-up Bar | 6 |
 
