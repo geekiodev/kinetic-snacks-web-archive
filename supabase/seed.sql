@@ -1,5 +1,25 @@
 -- Seed data for exercises
 
+insert into public.preference_equipment_options (key, label, sort_order, is_active)
+values
+  ('doorway_pullup_bar', 'Doorway Pull-up Bar', 10, true),
+  ('resistance_bands', 'Resistance Bands', 20, true),
+  ('dumbbells', 'Dumbbells', 30, true),
+  ('kettlebells', 'Kettlebells', 40, true),
+  ('jump_rope', 'Jump Rope', 50, true),
+  ('yoga_mat', 'Yoga Mat', 60, true),
+  ('chair', 'Chair', 70, true),
+  ('countertop', 'Countertop', 80, true),
+  ('wall_space', 'Wall Space', 90, true),
+  ('floor_space', 'Floor Space', 100, true),
+  ('none_bodyweight_only', 'None / Bodyweight Only', 110, true)
+on conflict (key) do update
+set
+  label = excluded.label,
+  sort_order = excluded.sort_order,
+  is_active = excluded.is_active,
+  updated_at = now();
+
 insert into public.exercises (title, duration_minutes, intensity, equipment, instructions, tips, category, movement_tags, body_region_tags, context_tags, location_tags, contraindication_tags, requires_floor, standing_only, no_sweat, variation_key)
 values
   (
@@ -1081,5 +1101,41 @@ values
     true,
     true,
     'chair-balance-reach'
+  ),
+  (
+    'Kettlebell Hinge Primer',
+    8,
+    'medium',
+    array['Kettlebells'],
+    array['Stand with feet shoulder-width apart', 'Hinge at the hips and guide the kettlebell to mid-shin', 'Drive through your feet to stand tall', 'Complete 8 reps for 3 rounds'],
+    'A concise hinge-focused strength snack for kettlebell days.',
+    'Strength',
+    array['hip_hinge'],
+    array['hips_glutes', 'core'],
+    array['home_friendly'],
+    array['Living Room', 'Gym'],
+    array['Back Pain'],
+    false,
+    true,
+    false,
+    'kettlebell-hinge-primer'
+  ),
+  (
+    'Jump Rope Rhythm Builder',
+    6,
+    'medium',
+    array['Jump Rope'],
+    array['Jump rope for 30 seconds at a steady pace', 'Recover for 20 seconds', 'Repeat 6 rounds', 'Finish with calf stretches for 20 seconds per side'],
+    'Builds quick cardio capacity in a short, repeatable interval block.',
+    'Activation',
+    array['cardio'],
+    array['ankles_calves', 'cardio_endurance'],
+    array['home_friendly', 'outdoor_friendly'],
+    array['Outdoor Space', 'Gym', 'Living Room'],
+    array['Ankle Issues'],
+    false,
+    true,
+    false,
+    'jump-rope-rhythm-builder'
   )
 ;

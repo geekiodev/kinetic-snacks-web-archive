@@ -67,7 +67,7 @@ export default function SpaceAnalysis({ onBack, isPremium, onUpgrade }: SpaceAna
     setTimeout(() => {
       setAnalysisResult({
         dimensions: '10ft x 8ft',
-        equipment: ['Doorway Pull-up Bar', 'Yoga Mat', 'Wall Space'],
+        equipment: ['Doorway Pull-up Bar', 'Yoga Mat', 'Wall Space', 'Kettlebells', 'Jump Rope'],
         usableSpace: 'Approximately 60 sq ft of clear floor space',
         recommendations: [
           {
@@ -84,6 +84,11 @@ export default function SpaceAnalysis({ onBack, isPremium, onUpgrade }: SpaceAna
             title: 'Wall-Assisted Exercises',
             description: 'Wall push-ups, wall sits, shoulder slides, and balance work using the wall.',
             equipment: ['Wall Space']
+          },
+          {
+            title: 'Kettlebell + Rope Conditioning',
+            description: 'Alternate controlled kettlebell hinges with short jump-rope bursts for quick cardio-strength intervals.',
+            equipment: ['Kettlebells', 'Jump Rope']
           }
         ],
         safetyNotes: [

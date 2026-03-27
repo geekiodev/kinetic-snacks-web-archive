@@ -268,6 +268,25 @@ on public.exercise_completions for delete
 to authenticated
 using (auth.uid() = user_id);
 
+-- Preference equipment options
+create table if not exists public.preference_equipment_options (
+  id uuid primary key default gen_random_uuid(),
+  key text not null unique,
+  label text not null unique,
+  sort_order integer not null default 100,
+  is_active boolean not null default true,
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now()
+);
+
+alter table public.preference_equipment_options enable row level security;
+
+drop policy if exists "preference_equipment_options_select_all" on public.preference_equipment_options;
+create policy "preference_equipment_options_select_all"
+on public.preference_equipment_options for select
+to authenticated
+using (true);
+
 -- Limitation rules
 create table if not exists public.limitation_rules (
   id uuid primary key default gen_random_uuid(),

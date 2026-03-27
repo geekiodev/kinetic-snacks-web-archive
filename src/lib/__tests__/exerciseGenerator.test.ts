@@ -116,6 +116,24 @@ describe('rankExercises', () => {
     expect(generated.every((exercise) => exercise.id.includes('generated-'))).toBe(true);
   });
 
+  it('can generate templates for newly supported equipment options', async () => {
+    const generated = await generateExercises({
+      preferences: {
+        ...preferences,
+        equipment: ['Kettlebells', 'Jump Rope'],
+        location: ['Gym'],
+        intensityLevel: 'medium',
+        duration: 8,
+      },
+      count: 3,
+    });
+
+    expect(
+      generated.some((exercise) => exercise.equipment.includes('Kettlebells'))
+      || generated.some((exercise) => exercise.equipment.includes('Jump Rope'))
+    ).toBe(true);
+  });
+
   it('spreads categories and variation groups when scores are otherwise similar', () => {
     const ranked = rankExercises({
       preferences,

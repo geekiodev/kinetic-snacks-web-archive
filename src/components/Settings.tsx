@@ -1,6 +1,7 @@
 import { ArrowLeft, Save, User, Bell, Shield, HelpCircle, LogOut, Camera, Mail, Smartphone } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { UserPreferences } from '../App';
+import { FALLBACK_EQUIPMENT_OPTIONS, loadEquipmentOptions } from '../lib/equipmentOptions';
 
 interface SettingsProps {
   preferences: UserPreferences;
@@ -27,6 +28,23 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
     pushNotifications: true,
     emailNotifications: false,
   });
+  const [equipmentOptions, setEquipmentOptions] = useState<string[]>([...FALLBACK_EQUIPMENT_OPTIONS]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const hydrateEquipmentOptions = async () => {
+      const options = await loadEquipmentOptions();
+      if (!isMounted) return;
+      setEquipmentOptions(options);
+    };
+
+    void hydrateEquipmentOptions();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const toggleArrayItem = (array: string[], item: string) => {
     return array.includes(item)
@@ -213,17 +231,7 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
                 Available Equipment
               </h2>
               <div className="grid sm:grid-cols-2 gap-2.5 sm:gap-3">
-                {[
-                  'Doorway Pull-up Bar',
-                  'Resistance Bands',
-                  'Dumbbells',
-                  'Yoga Mat',
-                  'Chair',
-                  'Countertop',
-                  'Wall Space',
-                  'Floor Space',
-                  'None / Bodyweight Only',
-                ].map((equipment) => {
+                {equipmentOptions.map((equipment) => {
                   const isSelected = localPreferences.equipment.includes(equipment);
                   const toggle = () =>
                     setLocalPreferences((prev) => ({
