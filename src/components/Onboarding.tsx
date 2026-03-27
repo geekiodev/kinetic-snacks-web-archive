@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronRight, ChevronLeft } from 'lucide-react';
 import { UserPreferences } from '../App';
+import { FALLBACK_EQUIPMENT_OPTIONS, loadEquipmentOptions } from '../lib/equipmentOptions';
 
 interface OnboardingProps {
   onComplete: (preferences: UserPreferences) => void;
@@ -15,6 +16,23 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     intensityLevel: 'low',
     duration: 5,
   });
+  const [equipmentOptions, setEquipmentOptions] = useState<string[]>([...FALLBACK_EQUIPMENT_OPTIONS]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const hydrateEquipmentOptions = async () => {
+      const options = await loadEquipmentOptions();
+      if (!isMounted) return;
+      setEquipmentOptions(options);
+    };
+
+    void hydrateEquipmentOptions();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleNext = () => {
     if (step < 4) {
@@ -114,17 +132,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               </div>
 
               <div className="grid sm:grid-cols-2 gap-2.5 sm:gap-3">
-                {[
-                  'Doorway Pull-up Bar',
-                  'Resistance Bands',
-                  'Dumbbells',
-                  'Yoga Mat',
-                  'Chair',
-                  'Countertop',
-                  'Wall Space',
-                  'Floor Space',
-                  'None / Bodyweight Only',
-                ].map((equipment) => {
+                {equipmentOptions.map((equipment) => {
                   const isSelected = preferences.equipment.includes(equipment);
                   const toggle = () =>
                     setPreferences((prev) => ({
