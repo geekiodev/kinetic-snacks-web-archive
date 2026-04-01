@@ -27,6 +27,8 @@ const mockedState = vi.hoisted(() => ({
     | undefined,
   hasProfile: false,
   profileSelectError: null as string | null,
+  getSessionMock: vi.fn().mockResolvedValue({ data: { session: null } }),
+  setSessionMock: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
   profileUpdateMock: vi.fn().mockResolvedValue({ error: null }),
   completionInsertMock: vi.fn().mockResolvedValue({ error: null }),
   signOutMock: vi.fn().mockResolvedValue({ error: null }),
@@ -118,8 +120,8 @@ vi.mock('../lib/supabase', () => ({
     from: mockedState.fromMock,
     auth: {
       storageKey: 'sb-local-auth-token',
-      getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
-      setSession: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
+      getSession: mockedState.getSessionMock,
+      setSession: mockedState.setSessionMock,
       signOut: mockedState.signOutMock,
       onAuthStateChange: vi.fn((cb) => {
         mockedState.authStateChangeHandler = cb;
@@ -136,6 +138,8 @@ describe('App end-to-end orchestration', () => {
     mockedState.hasProfile = false;
     mockedState.profileSelectError = null;
     mockedState.authStateChangeHandler = undefined;
+    mockedState.getSessionMock.mockClear();
+    mockedState.setSessionMock.mockClear();
     mockedState.fromMock.mockClear();
     mockedState.completionInsertMock.mockClear();
     mockedState.profileUpdateMock.mockClear();
@@ -197,6 +201,34 @@ describe('App end-to-end orchestration', () => {
     await user.click(screen.getByRole('button', { name: 'Finish Payment' }));
     await user.click(screen.getByRole('button', { name: 'Open Space Analysis' }));
     expect(await screen.findByText('Premium Enabled')).toBeInTheDocument();
+  });
+
+  it('hydrates from local storage and keeps free plan when payment modal closes', async () => {
+    mockedState.hasProfile = true;
+    const user = userEvent.setup();
+    window.localStorage.setItem('sb-local-auth-token', JSON.stringify({
+      access_token: 'stored-access',
+      refresh_token: 'stored-refresh',
+      user: { id: 'user-2', email: 'free@example.com', user_metadata: { name: 'Free User' } },
+    }));
+
+    render(<App />);
+
+    await screen.findByText('Dashboard Screen');
+    await waitFor(() => {
+      expect(mockedState.setSessionMock).toHaveBeenCalledWith({
+        access_token: 'stored-access',
+        refresh_token: 'stored-refresh',
+      });
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Upgrade Plan' }));
+    await screen.findByText('Payment Modal');
+    await user.click(screen.getByRole('button', { name: 'Close Payment' }));
+    await screen.findByText('Dashboard Screen');
+
+    await user.click(screen.getByRole('button', { name: 'Open Space Analysis' }));
+    expect(await screen.findByText('Free Tier')).toBeInTheDocument();
   });
 
   it('surfaces profile-load errors in the UI', async () => {
