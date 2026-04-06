@@ -8,7 +8,7 @@
 - Add new learnings, patterns, and anti-patterns as discovered
 - Archive verbose details to `KNOWLEDGE_BASE_ARCHIVE.md` when main file grows too large
 
-**Last Updated:** 2026-04-07 - Profile load resilience and notification_preferences timezone repair migration
+**Last Updated:** 2026-04-06 - Snack autopilot limit accounting clarification
 
 ---
 
@@ -25,6 +25,7 @@
 ### 🎯 **Critical Decisions**
 1. Use Supabase Auth + `profiles` for user identity and preferences.
 2. Track exercise completions in `exercise_completions` to power streaks and stats.
+3. Shift toward an autopilot recommendation path (assigned snack + notification) to reduce decision fatigue, with free-tier limits based on assignments/swaps rather than browsing views.
 
 ---
 
@@ -189,6 +190,18 @@ This section mirrors `docs/API_SURFACE.md`.
 - **Cause:** `profiles` used `.single()` (error when no row); `notification_preferences` select listed `timezone` before a repaired DB had that column → PostgREST 400.
 - **Fix:** `maybeSingle()` for profiles; omit `timezone` from read select (still sent on upsert); migration `20260407200000_ensure_notification_preferences_timezone.sql` idempotently adds column. Merged with upstream PR #24 (`PGRST116` guard on profile load).
 - **Key Learning:** If a migration file is edited after it was applied remotely, add a new migration for deltas instead of relying on a re-run.
+
+### **2026-04-06 - Snack autopilot workflow proposal**
+- **Decision artifact:** Added `docs/SNACK_AUTOPILOT_WORKFLOW.md` to define the low-friction workflow where the system assigns and nudges one snack instead of requiring user selection from a list.
+- **Entitlement strategy:** Proposed moving free-tier guardrails from `daily_exercise_views` toward assignment-centric limits (`daily_assigned_snacks` + `daily_manual_swaps`) so core autopilot value does not burn browse quota.
+- **Policy alignment:** Recommendation keeps notification caps and assignment caps synchronized to prevent contradictory states.
+- **Key Learning:** When UX shifts from browsing to automation, monetization controls must shift from "views" to "actions" to stay intuitive.
+
+### **2026-04-06 - Autopilot quota decrement rules clarified**
+- **Clarification:** Explicitly documented which events decrement free daily counters vs which are non-decrementing reads/delivery events.
+- **Rule:** New assignment creation (including fallback regeneration) decrements assignment quota; viewing/opening/starting/completing an assigned snack does not.
+- **Rule:** Manual user-confirmed swap decrements swap quota; system safety swaps and cancelled swap flows do not.
+- **Key Learning:** Entitlement models need event-level accounting rules (creation vs interaction) to prevent hidden quota burn and support user trust.
 
 ### **2026-04-06 - Notifications (DB, Edge, client)**
 - **DB:** `notification_preferences`, `notification_policy_config`, migration `20260406110000_notification_preferences_and_policy.sql` (file was amended after first apply; if the remote was migrated earlier, diff SQL against prod or re-verify objects match repo).
