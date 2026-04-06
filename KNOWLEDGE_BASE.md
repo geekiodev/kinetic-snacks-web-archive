@@ -8,7 +8,7 @@
 - Add new learnings, patterns, and anti-patterns as discovered
 - Archive verbose details to `KNOWLEDGE_BASE_ARCHIVE.md` when main file grows too large
 
-**Last Updated:** 2026-04-06 - Notification preferences, policy tables, and Edge notification helpers
+**Last Updated:** 2026-04-06 - Edge notification pipeline (plan, dispatch, feedback) and client wiring
 
 ---
 
@@ -73,13 +73,20 @@ This section mirrors `docs/API_SURFACE.md`.
 
 #### notifications-plan
 - **Purpose:** Authoritative send/no-send for proactive nudges (quiet hours, caps, tier policy from DB config).
-- **Input:** `{ now_utc?: string }`
-- **Output:** `{ send_now: boolean, reason: string, nudge_type: string | null, next_eligible_at: string | null }`
+- **Input:** `{ now_utc?: string, dry_run?: boolean }`
+- **Output:** `{ send_now: boolean, reason: string, nudge_type: string | null, dry_run: boolean, next_eligible_at: string | null }`
+- **Notes:** Shared decision logic lives in `supabase/functions/notifications-plan/usageLogic.ts` (unit-tested).
 
 #### notifications-feedback
 - **Purpose:** Record notification outcomes (opened, dismissed, snoozed, converted).
 - **Input:** `{ event_id: string, action: 'opened' | 'dismissed' | 'snoozed' | 'converted' }`
 - **Output:** `{ ok: boolean }`
+
+#### notifications-dispatch
+- **Purpose:** Scheduled worker that scans eligible users and queues `planned` nudge events (service role).
+- **Input:** `{}`
+- **Output:** `{ queued: number, scanned: number, run_at: string }`
+- **Notes:** Uses `notification_preferences` + `notification_policy_config`; imports decision helpers from `notifications-plan/usageLogic.ts`.
 
 ---
 
@@ -178,11 +185,11 @@ This section mirrors `docs/API_SURFACE.md`.
 
 ## 📝 Update Log
 
-### **2026-04-06 - Notification preferences and nudge policy**
-- Added `notification_preferences` and `notification_policy_config` (migration `20260406110000_notification_preferences_and_policy.sql`), RLS for user prefs and readable global policy.
-- Client: `src/lib/notificationSettings.ts` (defaults + `normalizeNotificationSettings`), onboarding and settings UI updates, unit tests for settings helpers and onboarding flow.
-- Edge: `notifications-plan` and `notifications-feedback` documented in `docs/API_SURFACE.md` for send decisions and engagement logging.
-- **Key Learning:** Keep client normalization in one module so UI and Supabase writes stay consistent with DB defaults and check constraints.
+### **2026-04-06 - Notifications (DB, Edge, client)**
+- **DB:** `notification_preferences`, `notification_policy_config`, migration `20260406110000_notification_preferences_and_policy.sql` (file was amended after first apply; if the remote was migrated earlier, diff SQL against prod or re-verify objects match repo).
+- **Edge:** `notifications-plan` (auth, `dry_run`), `notifications-feedback`, `notifications-dispatch` (service role queue); shared `notifications-plan/usageLogic.ts` + tests.
+- **Client:** `notificationSettings.ts`, onboarding/settings, `App`/`Dashboard` wiring and E2E + gating tests.
+- **Key Learning:** One `normalizeNotificationSettings()` module for client writes; one `usageLogic` module for plan/dispatch decisions so policy does not fork.
 
 ### **2026-02-03 - Knowledge base setup**
 - Added KB system and Cursor rules

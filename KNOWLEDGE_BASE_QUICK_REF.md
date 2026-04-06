@@ -22,7 +22,7 @@
 - Store user preferences in `profiles.preferences` (jsonb)
 - Store completions in `exercise_completions`
 - Notification UX and persistence: `notification_preferences` (Supabase) + `normalizeNotificationSettings()` in `src/lib/notificationSettings.ts` before read/write
-- Nudge send decisions and engagement: Edge `notifications-plan` / `notifications-feedback` (see `docs/API_SURFACE.md`)
+- Nudge send decisions, worker queue, and engagement: Edge `notifications-plan` (incl. `dry_run`), `notifications-dispatch`, `notifications-feedback` (see `docs/API_SURFACE.md`)
 
 ---
 
