@@ -187,7 +187,7 @@ This section mirrors `docs/API_SURFACE.md`.
 
 ### **2026-04-07 - Profile load 400 / banner fix**
 - **Cause:** `profiles` used `.single()` (error when no row); `notification_preferences` select listed `timezone` before a repaired DB had that column → PostgREST 400.
-- **Fix:** `maybeSingle()` for profiles; omit `timezone` from read select (still sent on upsert); migration `20260407200000_ensure_notification_preferences_timezone.sql` idempotently adds column.
+- **Fix:** `maybeSingle()` for profiles; omit `timezone` from read select (still sent on upsert); migration `20260407200000_ensure_notification_preferences_timezone.sql` idempotently adds column. Merged with upstream PR #24 (`PGRST116` guard on profile load).
 - **Key Learning:** If a migration file is edited after it was applied remotely, add a new migration for deltas instead of relying on a re-run.
 
 ### **2026-04-06 - Notifications (DB, Edge, client)**
