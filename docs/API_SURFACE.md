@@ -43,14 +43,21 @@ which actions are direct database writes vs. required Edge Functions.
 
 ### notifications-plan
 - **Purpose:** Return authoritative send/no-send decision for proactive nudges.
-- **Input:** `{ now_utc?: string }`
-- **Output:** `{ send_now: boolean, reason: string, nudge_type: string | null, next_eligible_at: string | null }`
+- **Input:** `{ now_utc?: string, dry_run?: boolean }`
+- **Output:** `{ send_now: boolean, reason: string, nudge_type: string | null, dry_run: boolean, next_eligible_at: string | null }`
 - **Notes:** Applies quiet-hours, cap, and tier policy from DB config.
 
 ### notifications-feedback
 - **Purpose:** Record notification outcomes and engagement events.
 - **Input:** `{ event_id: string, action: 'opened' | 'dismissed' | 'snoozed' | 'converted' }`
 - **Output:** `{ ok: boolean }`
+
+
+### notifications-dispatch
+- **Purpose:** Scheduled worker endpoint that queues eligible nudge events.
+- **Input:** `{}`
+- **Output:** `{ queued: number, scanned: number, run_at: string }`
+- **Notes:** Uses service role and `notification_preferences` + policy config to enqueue `planned` events.
 
 
 ---

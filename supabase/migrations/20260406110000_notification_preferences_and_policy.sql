@@ -1,6 +1,7 @@
 create table if not exists public.notification_preferences (
   user_id uuid primary key references auth.users(id) on delete cascade,
   push_enabled boolean not null default true,
+  timezone text not null default 'UTC',
   quiet_hours_enabled boolean not null default true,
   quiet_start_local time not null default '21:30',
   quiet_end_local time not null default '07:00',
@@ -9,6 +10,8 @@ create table if not exists public.notification_preferences (
   created_at timestamp with time zone default now(),
   updated_at timestamp with time zone default now()
 );
+
+alter table public.notification_preferences add column if not exists timezone text not null default 'UTC';
 
 alter table public.notification_preferences enable row level security;
 
@@ -89,3 +92,30 @@ on conflict (id) do update set
   quiet_hours_default_start = excluded.quiet_hours_default_start,
   quiet_hours_default_end = excluded.quiet_hours_default_end,
   updated_at = now();
+
+
+create table if not exists public.nudge_event_log (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  nudge_type text not null,
+  status text not null,
+  reason text,
+  created_at timestamp with time zone default now()
+);
+
+create index if not exists nudge_event_log_user_created_idx
+  on public.nudge_event_log (user_id, created_at desc);
+
+alter table public.nudge_event_log enable row level security;
+
+drop policy if exists "nudge_event_log_select_own" on public.nudge_event_log;
+create policy "nudge_event_log_select_own"
+on public.nudge_event_log for select
+to authenticated
+using (auth.uid() = user_id);
+
+drop policy if exists "nudge_event_log_insert_own" on public.nudge_event_log;
+create policy "nudge_event_log_insert_own"
+on public.nudge_event_log for insert
+to authenticated
+with check (auth.uid() = user_id);

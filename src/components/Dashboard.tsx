@@ -40,6 +40,7 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [isLoadingExercises, setIsLoadingExercises] = useState(false);
   const [exerciseError, setExerciseError] = useState('');
+  const [nudgeStatus, setNudgeStatus] = useState<string | null>(null);
 
   const isPremium = subscriptionPlan === 'premium';
 
@@ -168,6 +169,54 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
 
     void loadFreeUsage();
   }, [userId, isPremium, freeLimit]);
+
+
+  useEffect(() => {
+    const loadNudgePreview = async () => {
+      if (!userId) {
+        setNudgeStatus(null);
+        return;
+      }
+
+      const planResponse = await supabase.functions.invoke('notifications-plan', {
+        body: {
+          dry_run: true,
+          now_utc: new Date().toISOString(),
+        },
+      });
+
+      if (!planResponse) {
+        setNudgeStatus(null);
+        return;
+      }
+
+      const { data, error } = planResponse;
+
+      if (error || !data) {
+        setNudgeStatus(null);
+        return;
+      }
+
+      if (data.send_now) {
+        setNudgeStatus('Great timing — you are in an ideal snack window right now.');
+        return;
+      }
+
+      if (data.reason === 'quiet_hours') {
+        setNudgeStatus('Quiet hours are active. We will wait until your wake window to send nudges.');
+        return;
+      }
+
+      if (data.reason === 'daily_cap_reached') {
+        setNudgeStatus("You have reached today's nudge cap. We'll resume tomorrow.");
+        return;
+      }
+
+      setNudgeStatus(null);
+    };
+
+    void loadNudgePreview();
+  }, [userId, isPremium]);
 
   useEffect(() => {
     const loadExercises = async () => {
@@ -505,6 +554,13 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
             Ready to keep your {currentStreak}-day streak alive?
           </p>
         </div>
+
+
+        {nudgeStatus && (
+          <div className="mb-6 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-900">
+            {nudgeStatus}
+          </div>
+        )}
 
         {/* Premium Upgrade Banner */}
         {!isPremium && (
