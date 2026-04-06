@@ -6,3 +6,4 @@ Requirements (always):
 - Analyze this application and write a comprehensive end-to-end test to cover both functionality and UI behavior.
 - Run the tests after changes.
 - Going forward, any new feature added must include a test, and the test suite must be run.
+- Update `KNOWLEDGE_BASE.md` (and quick ref / checklist when applicable) after significant changes and after pulling or merging upstream work that adds migrations, API surface, or user-visible behavior; follow `KNOWLEDGE_BASE_UPDATE_CHECKLIST.md` before commits/PRs.

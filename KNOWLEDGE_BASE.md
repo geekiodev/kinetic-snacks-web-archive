@@ -8,7 +8,7 @@
 - Add new learnings, patterns, and anti-patterns as discovered
 - Archive verbose details to `KNOWLEDGE_BASE_ARCHIVE.md` when main file grows too large
 
-**Last Updated:** 2026-02-03 - Knowledge base setup
+**Last Updated:** 2026-04-06 - Notification preferences, policy tables, and Edge notification helpers
 
 ---
 
@@ -17,6 +17,7 @@
 ### ✅ **What Works Well**
 1. Centralized view state in `App.tsx` keeps navigation simple while prototyping.
 2. Supabase Auth + profiles table provides a clean user state source.
+3. Typed notification defaults and `normalizeNotificationSettings()` keep client state aligned with DB defaults and invalid input out of writes.
 
 ### ❌ **What Doesn't Work / Anti-Patterns**
 1. Relying on local-only state for critical data (subscriptions, completions) leads to lost data on refresh.
@@ -70,6 +71,16 @@ This section mirrors `docs/API_SURFACE.md`.
 - **Input:** `{}`
 - **Output:** `{ allowed: boolean }`
 
+#### notifications-plan
+- **Purpose:** Authoritative send/no-send for proactive nudges (quiet hours, caps, tier policy from DB config).
+- **Input:** `{ now_utc?: string }`
+- **Output:** `{ send_now: boolean, reason: string, nudge_type: string | null, next_eligible_at: string | null }`
+
+#### notifications-feedback
+- **Purpose:** Record notification outcomes (opened, dismissed, snoozed, converted).
+- **Input:** `{ event_id: string, action: 'opened' | 'dismissed' | 'snoozed' | 'converted' }`
+- **Output:** `{ ok: boolean }`
+
 ---
 
 ### Direct DB Writes (RLS enforced)
@@ -79,6 +90,12 @@ This section mirrors `docs/API_SURFACE.md`.
 - **Owner:** user
 - **Rationale:** User-owned settings, no metering or billing risk.
 - **Constraints:** RLS must ensure `auth.uid() = id`.
+
+#### notification_preferences
+- **Write:** `notification_preferences.insert` / `notification_preferences.update`
+- **Owner:** user
+- **Rationale:** User-owned quiet hours, reminder window, push toggle, optional daily cap override.
+- **Constraints:** RLS must ensure `auth.uid() = user_id`; server policy reads `notification_policy_config` for tier caps.
 
 #### exercise_completions
 - **Write:** `exercise_completions.insert`
@@ -119,10 +136,17 @@ This section mirrors `docs/API_SURFACE.md`.
 - `exercise_views (user_id, exercise_id, day_key)`
 - `ai_plan_generations (user_id, month_key)`
 - `exercise_generations (user_id, month_key)`
+- `nudge_event_log (user_id, nudge_type, status, sent_at)`
+
+#### Notification config
+- `notification_preferences`: per-user push, quiet hours (local time), reminder window, optional `max_daily_notifications_override`.
+- `notification_policy_config`: singleton-style global row (`id='global'`) for free/premium caps, backoff, wake/bed buffers, default quiet hours.
 
 #### RLS Requirements
 - `profiles`: select/update own only
 - `exercise_completions`: insert/select own only
+- `notification_preferences`: select/insert/update own only
+- `notification_policy_config`: read for authenticated (policy details in migration)
 - ledgers: insert/select own only
 
 ---
@@ -154,6 +178,12 @@ This section mirrors `docs/API_SURFACE.md`.
 
 ## 📝 Update Log
 
+### **2026-04-06 - Notification preferences and nudge policy**
+- Added `notification_preferences` and `notification_policy_config` (migration `20260406110000_notification_preferences_and_policy.sql`), RLS for user prefs and readable global policy.
+- Client: `src/lib/notificationSettings.ts` (defaults + `normalizeNotificationSettings`), onboarding and settings UI updates, unit tests for settings helpers and onboarding flow.
+- Edge: `notifications-plan` and `notifications-feedback` documented in `docs/API_SURFACE.md` for send decisions and engagement logging.
+- **Key Learning:** Keep client normalization in one module so UI and Supabase writes stay consistent with DB defaults and check constraints.
+
 ### **2026-02-03 - Knowledge base setup**
 - Added KB system and Cursor rules
 - Documented initial architecture and decisions
@@ -164,6 +194,7 @@ This section mirrors `docs/API_SURFACE.md`.
 ## 🎓 Lessons Learned Summary
 
 1. Keep persistence and auth flows aligned to avoid inconsistent state.
+2. After pulling upstream work, reconcile `KNOWLEDGE_BASE.md` with `docs/API_SURFACE.md` and new migrations so the KB does not lag the repo.
 
 ---
 
