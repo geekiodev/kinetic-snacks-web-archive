@@ -1,7 +1,8 @@
-import { ArrowLeft, Save, User, Bell, Shield, HelpCircle, LogOut, Camera, Mail, Smartphone } from 'lucide-react';
+import { ArrowLeft, Save, User, Bell, Shield, HelpCircle, LogOut, Camera, Smartphone } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { UserPreferences } from '../App';
 import { FALLBACK_EQUIPMENT_OPTIONS, loadEquipmentOptions } from '../lib/equipmentOptions';
+import { normalizeNotificationSettings } from '../lib/notificationSettings';
 
 interface SettingsProps {
   preferences: UserPreferences;
@@ -20,16 +21,12 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
     name: user?.name || '',
     email: user?.email || '',
   });
-  const [notifications, setNotifications] = useState({
-    exerciseReminders: true,
-    dailyStreak: true,
-    weeklyProgress: false,
-    newExercises: false,
-    pushNotifications: true,
-    emailNotifications: false,
-  });
   const [equipmentOptions, setEquipmentOptions] = useState<string[]>([...FALLBACK_EQUIPMENT_OPTIONS]);
 
+
+  useEffect(() => {
+    setLocalPreferences(preferences);
+  }, [preferences]);
   useEffect(() => {
     let isMounted = true;
 
@@ -53,7 +50,10 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
   };
 
   const handleSave = () => {
-    onSave(localPreferences);
+    onSave({
+      ...localPreferences,
+      notificationSettings: normalizeNotificationSettings(localPreferences.notificationSettings),
+    });
   };
 
   const handleSignOut = () => {
@@ -84,7 +84,7 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
               <span className="font-medium text-sm sm:text-base">Back</span>
             </button>
 
-            {activeTab === 'preferences' && (
+            {(activeTab === 'preferences' || activeTab === 'notifications') && (
               <button
                 onClick={handleSave}
                 className="touch-target flex items-center gap-2 bg-orange-600 hover:bg-orange-700 active:scale-95 font-semibold shadow-md hover:shadow-lg text-white px-4 sm:px-5 py-2 sm:py-2.5 rounded-lg transition-all text-sm sm:text-base"
@@ -377,108 +377,112 @@ export default function Settings({ preferences, user, onSave, onSignOut, onBack 
         {/* Notifications Tab */}
         {activeTab === 'notifications' && (
           <div className="space-y-4 sm:space-y-6">
-            {/* Push Notifications */}
             <section className="bg-white rounded-xl sm:rounded-2xl p-5 sm:p-6 shadow-sm border border-stone-100">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <Smartphone className="w-5 h-5 text-orange-600" />
-                  <h2 className="text-lg font-semibold text-slate-900">
-                    Push Notifications
-                  </h2>
-                </div>
+              <div className="flex items-center gap-3 mb-4">
+                <Smartphone className="w-5 h-5 text-orange-600" />
+                <h2 className="text-lg font-semibold text-slate-900">Proactive Notifications</h2>
               </div>
 
-              <div className="space-y-3 sm:space-y-4">
-                <div className="flex items-center justify-between py-2">
+              <div className="space-y-4">
+                <label className="flex items-center justify-between py-2">
                   <div>
-                    <p className="font-medium text-slate-900 text-sm sm:text-base">Exercise Reminders</p>
-                    <p className="text-xs sm:text-sm text-slate-500">Get notified when it's time for your snack</p>
+                    <p className="font-medium text-slate-900 text-sm sm:text-base">Push reminders</p>
+                    <p className="text-xs sm:text-sm text-slate-500">Enable snack-time nudges</p>
                   </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={notifications.exerciseReminders}
-                      onChange={(e) => setNotifications({ ...notifications, exerciseReminders: e.target.checked })}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-stone-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
-                  </label>
-                </div>
-
-                <div className="flex items-center justify-between py-2">
-                  <div>
-                    <p className="font-medium text-slate-900 text-sm sm:text-base">Daily Streak</p>
-                    <p className="text-xs sm:text-sm text-slate-500">Daily reminder to maintain your streak</p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={notifications.dailyStreak}
-                      onChange={(e) => setNotifications({ ...notifications, dailyStreak: e.target.checked })}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-stone-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
-                  </label>
-                </div>
-
-                <div className="flex items-center justify-between py-2">
-                  <div>
-                    <p className="font-medium text-slate-900 text-sm sm:text-base">Weekly Progress</p>
-                    <p className="text-xs sm:text-sm text-slate-500">Summary of your weekly activity</p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={notifications.weeklyProgress}
-                      onChange={(e) => setNotifications({ ...notifications, weeklyProgress: e.target.checked })}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-stone-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
-                  </label>
-                </div>
-
-                <div className="flex items-center justify-between py-2">
-                  <div>
-                    <p className="font-medium text-slate-900 text-sm sm:text-base">New Exercises</p>
-                    <p className="text-xs sm:text-sm text-slate-500">When new exercises are added</p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={notifications.newExercises}
-                      onChange={(e) => setNotifications({ ...notifications, newExercises: e.target.checked })}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-stone-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
-                  </label>
-                </div>
-              </div>
-            </section>
-
-            {/* Email Notifications */}
-            <section className="bg-white rounded-xl sm:rounded-2xl p-5 sm:p-6 shadow-sm border border-stone-100">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <Mail className="w-5 h-5 text-orange-600" />
-                  <h2 className="text-lg font-semibold text-slate-900">
-                    Email Notifications
-                  </h2>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between py-2">
-                <div>
-                  <p className="font-medium text-slate-900 text-sm sm:text-base">Email Updates</p>
-                  <p className="text-xs sm:text-sm text-slate-500">Receive updates via email</p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={notifications.emailNotifications}
-                    onChange={(e) => setNotifications({ ...notifications, emailNotifications: e.target.checked })}
-                    className="sr-only peer"
+                    checked={localPreferences.notificationSettings?.pushEnabled ?? true}
+                    onChange={(e) =>
+                      setLocalPreferences((prev) => ({
+                        ...prev,
+                        notificationSettings: normalizeNotificationSettings({
+                          ...prev.notificationSettings,
+                          pushEnabled: e.target.checked,
+                        }),
+                      }))
+                    }
+                    className="h-4 w-4 accent-orange-600"
                   />
-                  <div className="w-11 h-6 bg-stone-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
+                </label>
+
+                <label className="flex items-center justify-between py-2">
+                  <div>
+                    <p className="font-medium text-slate-900 text-sm sm:text-base">Quiet hours</p>
+                    <p className="text-xs sm:text-sm text-slate-500">Prevent overnight notifications</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={localPreferences.notificationSettings?.quietHoursEnabled ?? true}
+                    onChange={(e) =>
+                      setLocalPreferences((prev) => ({
+                        ...prev,
+                        notificationSettings: normalizeNotificationSettings({
+                          ...prev.notificationSettings,
+                          quietHoursEnabled: e.target.checked,
+                        }),
+                      }))
+                    }
+                    className="h-4 w-4 accent-orange-600"
+                  />
+                </label>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="text-sm text-slate-700">
+                    Quiet starts
+                    <input
+                      type="time"
+                      value={localPreferences.notificationSettings?.quietStartLocal ?? '21:30'}
+                      onChange={(e) =>
+                        setLocalPreferences((prev) => ({
+                          ...prev,
+                          notificationSettings: normalizeNotificationSettings({
+                            ...prev.notificationSettings,
+                            quietStartLocal: e.target.value,
+                          }),
+                        }))
+                      }
+                      className="mt-1 w-full px-3 py-2 rounded-lg border-2 border-stone-200"
+                    />
+                  </label>
+                  <label className="text-sm text-slate-700">
+                    Quiet ends
+                    <input
+                      type="time"
+                      value={localPreferences.notificationSettings?.quietEndLocal ?? '07:00'}
+                      onChange={(e) =>
+                        setLocalPreferences((prev) => ({
+                          ...prev,
+                          notificationSettings: normalizeNotificationSettings({
+                            ...prev.notificationSettings,
+                            quietEndLocal: e.target.value,
+                          }),
+                        }))
+                      }
+                      className="mt-1 w-full px-3 py-2 rounded-lg border-2 border-stone-200"
+                    />
+                  </label>
+                </div>
+
+                <label className="block text-sm text-slate-700">
+                  Preferred reminder window
+                  <select
+                    value={localPreferences.notificationSettings?.reminderWindow ?? 'anytime'}
+                    onChange={(e) =>
+                      setLocalPreferences((prev) => ({
+                        ...prev,
+                        notificationSettings: normalizeNotificationSettings({
+                          ...prev.notificationSettings,
+                          reminderWindow: e.target.value as 'anytime' | 'morning' | 'midday' | 'evening',
+                        }),
+                      }))
+                    }
+                    className="mt-1 w-full px-3 py-2 rounded-lg border-2 border-stone-200"
+                  >
+                    <option value="anytime">Anytime</option>
+                    <option value="morning">Morning</option>
+                    <option value="midday">Midday</option>
+                    <option value="evening">Evening</option>
+                  </select>
                 </label>
               </div>
             </section>

@@ -14,9 +14,18 @@ const mockedState = vi.hoisted(() => {
     category: 'mobility',
   };
 
-  const invokeMock = vi.fn().mockResolvedValue({
-    data: { allowed: false, remaining: 0, limit: 3 },
-    error: null,
+  const invokeMock = vi.fn().mockImplementation(async (fnName: string) => {
+    if (fnName === 'notifications-plan') {
+      return {
+        data: { send_now: false, reason: 'quiet_hours', nudge_type: null },
+        error: null,
+      };
+    }
+
+    return {
+      data: { allowed: false, remaining: 0, limit: 3 },
+      error: null,
+    };
   });
 
   const fromMock = vi.fn((table: string) => {
@@ -100,6 +109,11 @@ describe('Dashboard free-tier gating', () => {
         onUpgrade={onUpgrade}
       />,
     );
+
+    expect(await screen.findByText(/Quiet hours are active/i)).toBeInTheDocument();
+    expect(mockedState.invokeMock).toHaveBeenCalledWith('notifications-plan', expect.objectContaining({
+      body: expect.objectContaining({ dry_run: true }),
+    }));
 
     const card = await screen.findByRole('button', { name: /Test Snack/i });
     fireEvent.click(card);

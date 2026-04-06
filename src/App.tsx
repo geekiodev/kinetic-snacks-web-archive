@@ -9,6 +9,7 @@ import Auth from './components/Auth';
 import Pricing from './components/Pricing';
 import PaymentModal from './components/PaymentModal';
 import { supabase } from './lib/supabase';
+import { NotificationSettings, defaultNotificationSettings, normalizeNotificationSettings } from './lib/notificationSettings';
 
 export type View = 'landing' | 'auth' | 'onboarding' | 'pricing' | 'dashboard' | 'exercise' | 'settings' | 'space-analysis';
 export type SubscriptionPlan = 'free' | 'premium';
@@ -19,7 +20,48 @@ export interface UserPreferences {
   location: string[];
   intensityLevel: string;
   duration: number;
+  notificationSettings?: NotificationSettings;
 }
+
+
+interface NotificationPreferencesRow {
+  push_enabled: boolean;
+  timezone: string;
+  quiet_hours_enabled: boolean;
+  quiet_start_local: string;
+  quiet_end_local: string;
+  reminder_window: 'anytime' | 'morning' | 'midday' | 'evening';
+  max_daily_notifications_override: number | null;
+}
+
+const mapNotificationRowToSettings = (
+  row: NotificationPreferencesRow | null | undefined,
+): NotificationSettings =>
+  normalizeNotificationSettings(
+    row
+      ? {
+          pushEnabled: row.push_enabled,
+          quietHoursEnabled: row.quiet_hours_enabled,
+          quietStartLocal: row.quiet_start_local,
+          quietEndLocal: row.quiet_end_local,
+          reminderWindow: row.reminder_window,
+          maxDailyNotifications: row.max_daily_notifications_override,
+        }
+      : defaultNotificationSettings,
+  );
+
+const mapNotificationSettingsToRow = (
+  settings: NotificationSettings,
+  timezone: string,
+): NotificationPreferencesRow => ({
+  push_enabled: settings.pushEnabled,
+  timezone,
+  quiet_hours_enabled: settings.quietHoursEnabled,
+  quiet_start_local: settings.quietStartLocal,
+  quiet_end_local: settings.quietEndLocal,
+  reminder_window: settings.reminderWindow,
+  max_daily_notifications_override: settings.maxDailyNotifications,
+});
 
 export interface User {
   id: string;
@@ -66,6 +108,7 @@ function App() {
     location: [],
     intensityLevel: 'low',
     duration: 5,
+    notificationSettings: defaultNotificationSettings,
   });
 
   const hasCompletePreferences = (preferences: UserPreferences | null | undefined) => {
@@ -78,20 +121,38 @@ function App() {
 
   const loadProfile = async (userId: string) => {
     setProfileLoadError(null);
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('preferences')
-      .eq('id', userId)
-      .single();
+    const [{ data, error }, { data: notificationData, error: notificationError }] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('preferences')
+        .eq('id', userId)
+        .single(),
+      supabase
+        .from('notification_preferences')
+        .select('push_enabled,timezone,quiet_hours_enabled,quiet_start_local,quiet_end_local,reminder_window,max_daily_notifications_override')
+        .eq('user_id', userId)
+        .maybeSingle(),
+    ]);
 
     if (error) {
+      if (error.code === 'PGRST116') {
+        return false;
+      }
       setProfileLoadError(error.message);
       return false;
     }
 
+    if (notificationError && notificationError.code !== 'PGRST116') {
+      setProfileLoadError(notificationError.message);
+      return false;
+    }
+
     const preferences = data?.preferences as UserPreferences | null;
-    if (hasCompletePreferences(preferences)) {
-      setUserPreferences(preferences);
+    if (hasCompletePreferences(preferences) && preferences) {
+      setUserPreferences({
+        ...preferences,
+        notificationSettings: mapNotificationRowToSettings(notificationData as NotificationPreferencesRow | null | undefined),
+      });
       return true;
     }
 
@@ -250,15 +311,30 @@ function App() {
   };
 
   const handleOnboardingComplete = async (preferences: UserPreferences) => {
-    setUserPreferences(preferences);
+    const normalizedPreferences = {
+      ...preferences,
+      notificationSettings: normalizeNotificationSettings(preferences.notificationSettings),
+    };
+    setUserPreferences(normalizedPreferences);
     if (user) {
       await supabase
         .from('profiles')
         .update({
-          preferences,
+          preferences: normalizedPreferences,
           updated_at: new Date().toISOString(),
         })
         .eq('id', user.id);
+
+      await supabase
+        .from('notification_preferences')
+        .upsert({
+          user_id: user.id,
+          ...mapNotificationSettingsToRow(
+            normalizeNotificationSettings(normalizedPreferences.notificationSettings),
+            Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+          ),
+          updated_at: new Date().toISOString(),
+        });
     }
     setCurrentView('pricing');
   };
@@ -311,6 +387,7 @@ function App() {
       location: [],
       intensityLevel: 'low',
       duration: 5,
+      notificationSettings: defaultNotificationSettings,
     });
   };
 
@@ -373,17 +450,42 @@ function App() {
             return;
           }
 
+          const normalizedNotificationSettings = normalizeNotificationSettings(prefs.notificationSettings);
           const { error } = await supabase.from('profiles').update({
-            preferences: prefs,
+            preferences: {
+              ...prefs,
+              notificationSettings: normalizedNotificationSettings,
+            },
             updated_at: new Date().toISOString(),
           }).eq('id', user.id);
+
+          if (!error) {
+            const { error: notificationError } = await supabase
+              .from('notification_preferences')
+              .upsert({
+                user_id: user.id,
+                ...mapNotificationSettingsToRow(
+                  normalizedNotificationSettings,
+                  Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+                ),
+                updated_at: new Date().toISOString(),
+              });
+
+            if (notificationError) {
+              setProfileLoadError(notificationError.message);
+              return;
+            }
+          }
 
           if (error) {
             setProfileLoadError(error.message);
             return;
           }
 
-          setUserPreferences(prefs);
+          setUserPreferences({
+            ...prefs,
+            notificationSettings: normalizedNotificationSettings,
+          });
           setCurrentView('dashboard');
         }}
         onSignOut={handleSignOut}

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ChevronRight, ChevronLeft } from 'lucide-react';
 import { UserPreferences } from '../App';
 import { FALLBACK_EQUIPMENT_OPTIONS, loadEquipmentOptions } from '../lib/equipmentOptions';
+import { defaultNotificationSettings, normalizeNotificationSettings } from '../lib/notificationSettings';
 
 interface OnboardingProps {
   onComplete: (preferences: UserPreferences) => void;
@@ -15,6 +16,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     location: [],
     intensityLevel: 'low',
     duration: 5,
+    notificationSettings: defaultNotificationSettings,
   });
   const [equipmentOptions, setEquipmentOptions] = useState<string[]>([...FALLBACK_EQUIPMENT_OPTIONS]);
 
@@ -35,10 +37,13 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   }, []);
 
   const handleNext = () => {
-    if (step < 4) {
+    if (step < 5) {
       setStep(step + 1);
     } else {
-      onComplete(preferences);
+      onComplete({
+        ...preferences,
+        notificationSettings: normalizeNotificationSettings(preferences.notificationSettings),
+      });
     }
   };
 
@@ -67,7 +72,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
           {/* Progress Bar */}
           <div className="flex gap-2 mb-10">
-            {[1, 2, 3, 4].map((s) => (
+            {[1, 2, 3, 4, 5].map((s) => (
               <div
                 key={s}
                 className={`h-2.5 flex-1 rounded-full transition-smooth ${
@@ -278,6 +283,119 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
             </div>
           )}
 
+
+
+          {/* Step 5: Notifications */}
+          {step === 5 && (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-xl sm:text-2xl font-bold text-slate-900 mb-2 leading-tight">
+                  Set your proactive reminders
+                </h2>
+                <p className="text-slate-600 text-sm">
+                  We'll use this to nudge you at the right time without disturbing your sleep.
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-stone-200 p-4 space-y-4">
+                <label className="flex items-center justify-between gap-4">
+                  <span className="text-sm font-medium text-slate-800">Enable push reminders</span>
+                  <input
+                    type="checkbox"
+                    checked={preferences.notificationSettings?.pushEnabled ?? true}
+                    onChange={(e) =>
+                      setPreferences((prev) => ({
+                        ...prev,
+                        notificationSettings: normalizeNotificationSettings({
+                          ...prev.notificationSettings,
+                          pushEnabled: e.target.checked,
+                        }),
+                      }))
+                    }
+                    className="h-4 w-4 accent-orange-600"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between gap-4">
+                  <span className="text-sm font-medium text-slate-800">Use quiet hours</span>
+                  <input
+                    type="checkbox"
+                    checked={preferences.notificationSettings?.quietHoursEnabled ?? true}
+                    onChange={(e) =>
+                      setPreferences((prev) => ({
+                        ...prev,
+                        notificationSettings: normalizeNotificationSettings({
+                          ...prev.notificationSettings,
+                          quietHoursEnabled: e.target.checked,
+                        }),
+                      }))
+                    }
+                    className="h-4 w-4 accent-orange-600"
+                  />
+                </label>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="text-sm text-slate-700">
+                    Quiet starts
+                    <input
+                      type="time"
+                      value={preferences.notificationSettings?.quietStartLocal ?? '21:30'}
+                      onChange={(e) =>
+                        setPreferences((prev) => ({
+                          ...prev,
+                          notificationSettings: normalizeNotificationSettings({
+                            ...prev.notificationSettings,
+                            quietStartLocal: e.target.value,
+                          }),
+                        }))
+                      }
+                      className="mt-1 w-full rounded-lg border-2 border-stone-200 px-3 py-2"
+                    />
+                  </label>
+                  <label className="text-sm text-slate-700">
+                    Quiet ends
+                    <input
+                      type="time"
+                      value={preferences.notificationSettings?.quietEndLocal ?? '07:00'}
+                      onChange={(e) =>
+                        setPreferences((prev) => ({
+                          ...prev,
+                          notificationSettings: normalizeNotificationSettings({
+                            ...prev.notificationSettings,
+                            quietEndLocal: e.target.value,
+                          }),
+                        }))
+                      }
+                      className="mt-1 w-full rounded-lg border-2 border-stone-200 px-3 py-2"
+                    />
+                  </label>
+                </div>
+
+                <label className="block text-sm text-slate-700">
+                  Preferred reminder window
+                  <select
+                    value={preferences.notificationSettings?.reminderWindow ?? 'anytime'}
+                    onChange={(e) =>
+                      setPreferences((prev) => ({
+                        ...prev,
+                        notificationSettings: normalizeNotificationSettings({
+                          ...prev.notificationSettings,
+                          reminderWindow: e.target.value as 'anytime' | 'morning' | 'midday' | 'evening',
+                        }),
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border-2 border-stone-200 px-3 py-2"
+                  >
+                    <option value="anytime">Anytime</option>
+                    <option value="morning">Morning</option>
+                    <option value="midday">Midday</option>
+                    <option value="evening">Evening</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          )}
+
           {/* Navigation */}
           <div className="flex gap-2.5 sm:gap-3 mt-8">
             {step > 1 && (
@@ -294,7 +412,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               onClick={handleNext}
               className="touch-target group flex-1 sm:flex-initial flex items-center justify-center gap-2 px-6 sm:px-8 py-3 sm:py-4 rounded-lg sm:rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 active:scale-95 font-bold shadow-lg hover:shadow-xl text-white transition-smooth hover:scale-105 ml-auto text-sm sm:text-base"
             >
-              {step === 4 ? 'Start My Journey' : 'Continue'}
+              {step === 5 ? 'Start My Journey' : 'Continue'}
               <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 group-hover:translate-x-1 transition-transform" />
             </button>
           </div>

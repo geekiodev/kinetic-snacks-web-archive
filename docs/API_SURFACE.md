@@ -40,6 +40,26 @@ which actions are direct database writes vs. required Edge Functions.
 - **Input:** `{}`
 - **Output:** `{ allowed: boolean }`
 
+
+### notifications-plan
+- **Purpose:** Return authoritative send/no-send decision for proactive nudges.
+- **Input:** `{ now_utc?: string, dry_run?: boolean }`
+- **Output:** `{ send_now: boolean, reason: string, nudge_type: string | null, dry_run: boolean, next_eligible_at: string | null }`
+- **Notes:** Applies quiet-hours, cap, and tier policy from DB config.
+
+### notifications-feedback
+- **Purpose:** Record notification outcomes and engagement events.
+- **Input:** `{ event_id: string, action: 'opened' | 'dismissed' | 'snoozed' | 'converted' }`
+- **Output:** `{ ok: boolean }`
+
+
+### notifications-dispatch
+- **Purpose:** Scheduled worker endpoint that queues eligible nudge events.
+- **Input:** `{}`
+- **Output:** `{ queued: number, scanned: number, run_at: string }`
+- **Notes:** Uses service role and `notification_preferences` + policy config to enqueue `planned` events.
+
+
 ---
 
 ## Direct DB Writes (RLS enforced)
@@ -89,6 +109,11 @@ which actions are direct database writes vs. required Edge Functions.
 - `exercise_views (user_id, exercise_id, day_key)`
 - `ai_plan_generations (user_id, month_key)`
 - `exercise_generations (user_id, month_key)`
+- `nudge_event_log (user_id, nudge_type, status, sent_at)`
+
+### Notification Config Tables
+- `notification_preferences (user_id, push_enabled, quiet_start_local, quiet_end_local, reminder_window, max_daily_notifications_override)`
+- `notification_policy_config (id='global', max_daily_notifications_free, max_daily_notifications_premium, ignored_backoff_threshold, ignored_backoff_daily_cap)`
 
 ### RLS Requirements
 - `profiles`: select/update own only
