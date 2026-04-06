@@ -22,6 +22,7 @@ Update the knowledge base if you:
 - ✅ Incorporated user feedback
 - ✅ Made UI/UX changes
 - ✅ Added platform-specific code
+- ✅ **Synced the repo** from remote (pull/merge) and received new migrations, Edge functions, or user-facing behavior — reconcile `KNOWLEDGE_BASE.md` with `docs/API_SURFACE.md` and new SQL so the KB matches mainline
 
 ## Update Format
 
