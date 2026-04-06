@@ -40,6 +40,12 @@ which actions are direct database writes vs. required Edge Functions.
 - **Input:** `{}`
 - **Output:** `{ allowed: boolean }`
 
+### allow-snack-assignment
+- **Purpose:** Authoritative daily snack assignment + manual swap metering.
+- **Input:** `{ day_key?: string, swap?: boolean, candidate_exercise_ids: string[] }`
+- **Output:** `{ allowed?: boolean, assignment_id: string | null, assigned_exercise_id: string | null, reason?: string, remaining_assignments: number | null, remaining_swaps: number | null }`
+- **Notes:** Persists assignments in `daily_snack_assignments`; idempotent read for existing daily assignment when `swap` is false.
+
 
 ### notifications-plan
 - **Purpose:** Return authoritative send/no-send decision for proactive nudges.
@@ -107,6 +113,7 @@ which actions are direct database writes vs. required Edge Functions.
 
 ### Ledger Tables
 - `exercise_views (user_id, exercise_id, day_key)`
+- `daily_snack_assignments (user_id, day_key, assignment_index, exercise_id, source)`
 - `ai_plan_generations (user_id, month_key)`
 - `exercise_generations (user_id, month_key)`
 - `nudge_event_log (user_id, nudge_type, status, sent_at)`
