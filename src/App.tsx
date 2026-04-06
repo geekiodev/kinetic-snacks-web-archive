@@ -9,6 +9,7 @@ import Auth from './components/Auth';
 import Pricing from './components/Pricing';
 import PaymentModal from './components/PaymentModal';
 import { supabase } from './lib/supabase';
+import { NotificationSettings, defaultNotificationSettings, normalizeNotificationSettings } from './lib/notificationSettings';
 
 export type View = 'landing' | 'auth' | 'onboarding' | 'pricing' | 'dashboard' | 'exercise' | 'settings' | 'space-analysis';
 export type SubscriptionPlan = 'free' | 'premium';
@@ -19,6 +20,7 @@ export interface UserPreferences {
   location: string[];
   intensityLevel: string;
   duration: number;
+  notificationSettings?: NotificationSettings;
 }
 
 export interface User {
@@ -66,6 +68,7 @@ function App() {
     location: [],
     intensityLevel: 'low',
     duration: 5,
+    notificationSettings: defaultNotificationSettings,
   });
 
   const hasCompletePreferences = (preferences: UserPreferences | null | undefined) => {
@@ -90,8 +93,11 @@ function App() {
     }
 
     const preferences = data?.preferences as UserPreferences | null;
-    if (hasCompletePreferences(preferences)) {
-      setUserPreferences(preferences);
+    if (hasCompletePreferences(preferences) && preferences) {
+      setUserPreferences({
+        ...preferences,
+        notificationSettings: normalizeNotificationSettings(preferences.notificationSettings),
+      });
       return true;
     }
 
@@ -250,12 +256,16 @@ function App() {
   };
 
   const handleOnboardingComplete = async (preferences: UserPreferences) => {
-    setUserPreferences(preferences);
+    const normalizedPreferences = {
+      ...preferences,
+      notificationSettings: normalizeNotificationSettings(preferences.notificationSettings),
+    };
+    setUserPreferences(normalizedPreferences);
     if (user) {
       await supabase
         .from('profiles')
         .update({
-          preferences,
+          preferences: normalizedPreferences,
           updated_at: new Date().toISOString(),
         })
         .eq('id', user.id);
@@ -311,6 +321,7 @@ function App() {
       location: [],
       intensityLevel: 'low',
       duration: 5,
+      notificationSettings: defaultNotificationSettings,
     });
   };
 
@@ -374,7 +385,10 @@ function App() {
           }
 
           const { error } = await supabase.from('profiles').update({
-            preferences: prefs,
+            preferences: {
+              ...prefs,
+              notificationSettings: normalizeNotificationSettings(prefs.notificationSettings),
+            },
             updated_at: new Date().toISOString(),
           }).eq('id', user.id);
 
@@ -383,7 +397,10 @@ function App() {
             return;
           }
 
-          setUserPreferences(prefs);
+          setUserPreferences({
+            ...prefs,
+            notificationSettings: normalizeNotificationSettings(prefs.notificationSettings),
+          });
           setCurrentView('dashboard');
         }}
         onSignOut={handleSignOut}
