@@ -8,7 +8,7 @@
 - Add new learnings, patterns, and anti-patterns as discovered
 - Archive verbose details to `KNOWLEDGE_BASE_ARCHIVE.md` when main file grows too large
 
-**Last Updated:** 2026-04-06 - Snack autopilot limit accounting clarification
+**Last Updated:** 2026-04-06 - Backend-authoritative autopilot assignment + swap metering
 
 ---
 
@@ -71,6 +71,12 @@ This section mirrors `docs/API_SURFACE.md`.
 - **Purpose:** Enforce export entitlement.
 - **Input:** `{}`
 - **Output:** `{ allowed: boolean }`
+
+#### allow-snack-assignment
+- **Purpose:** Authoritative daily snack assignment + manual swap metering.
+- **Input:** `{ day_key?: string, swap?: boolean, candidate_exercise_ids: string[] }`
+- **Output:** `{ allowed?: boolean, assignment_id: string | null, assigned_exercise_id: string | null, reason?: string, remaining_assignments: number | null, remaining_swaps: number | null }`
+- **Notes:** Writes to `daily_snack_assignments`; returns existing assignment for idempotent non-swap calls.
 
 #### notifications-plan
 - **Purpose:** Authoritative send/no-send for proactive nudges (quiet hours, caps, tier policy from DB config).
@@ -142,6 +148,7 @@ This section mirrors `docs/API_SURFACE.md`.
 
 #### Ledger Tables
 - `exercise_views (user_id, exercise_id, day_key)`
+- `daily_snack_assignments (user_id, day_key, assignment_index, exercise_id, source)`
 - `ai_plan_generations (user_id, month_key)`
 - `exercise_generations (user_id, month_key)`
 - `nudge_event_log (user_id, nudge_type, status, sent_at)`
@@ -202,6 +209,19 @@ This section mirrors `docs/API_SURFACE.md`.
 - **Rule:** New assignment creation (including fallback regeneration) decrements assignment quota; viewing/opening/starting/completing an assigned snack does not.
 - **Rule:** Manual user-confirmed swap decrements swap quota; system safety swaps and cancelled swap flows do not.
 - **Key Learning:** Entitlement models need event-level accounting rules (creation vs interaction) to prevent hidden quota burn and support user trust.
+
+### **2026-04-06 - Dashboard autopilot assignment UX (v1)**
+- **Client UX:** Dashboard now promotes one auto-assigned snack (`exercises[0]`), adds a primary "Start Auto Snack" quick action, and reduces decision load by showing a single auto-picked card.
+- **Free-tier behavior:** Opening the assigned snack bypasses browse-view metering checks; free users get one manual swap per session-day view state (`manualSwapsRemaining = 1`) before upgrade prompt copy.
+- **QA:** Added UI behavior test to verify assigned-snack start path + free swap exhaustion message.
+- **Key Learning:** Progressive rollout can start in client UX first, but server-side assignment/swaps ledgers are still needed for authoritative cross-device enforcement.
+
+### **2026-04-06 - Autopilot assignment moved to Edge authority**
+- **Edge:** Added `allow-snack-assignment` with shared quota helpers (`usageLogic.ts`) to enforce assignment/swap limits and persist assignment ledger rows.
+- **DB:** Added migration `20260408120000_daily_snack_assignments.sql` (table + RLS policies) to support cross-device, day-scoped assignment history.
+- **Client:** Dashboard now requests assignment/swap decisions from Edge (`allow-snack-assignment`) instead of purely local selection/swap state.
+- **QA:** Added unit tests for new usage logic and updated Dashboard tests to mock assignment/swap function behavior.
+- **Key Learning:** Autopilot UX should be stateless on the client and stateful in Edge + ledger tables for deterministic behavior.
 
 ### **2026-04-06 - Notifications (DB, Edge, client)**
 - **DB:** `notification_preferences`, `notification_policy_config`, migration `20260406110000_notification_preferences_and_policy.sql` (file was amended after first apply; if the remote was migrated earlier, diff SQL against prod or re-verify objects match repo).

@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Dashboard from '../Dashboard';
 import { generateExercises, rankExercises } from '../../lib/exerciseGenerator';
 
 const mockedState = vi.hoisted(() => ({
   exerciseRows: [] as Array<Record<string, unknown>>,
+  swapUsed: false,
   generatedExercise: {
     id: 'generated-1',
     title: 'Generated Office Reset',
@@ -69,7 +70,47 @@ vi.mock('../../lib/supabase', () => ({
       setSession: vi.fn().mockResolvedValue({ data: { session: { access_token: 'token' } }, error: null }),
       refreshSession: vi.fn().mockResolvedValue({ data: { session: { access_token: 'token' } }, error: null }),
     },
-    functions: { invoke: vi.fn() },
+    functions: {
+      invoke: vi.fn(async (fnName: string, payload?: { body?: { swap?: boolean } }) => {
+        if (fnName !== 'allow-snack-assignment') {
+          return { data: null, error: null };
+        }
+
+        const isSwap = payload?.body?.swap === true;
+        if (!isSwap) {
+          return {
+            data: {
+              allowed: true,
+              assigned_exercise_id: 'approved-1',
+              remaining_swaps: null,
+            },
+            error: null,
+          };
+        }
+
+        if (!mockedState.swapUsed) {
+          mockedState.swapUsed = true;
+          return {
+            data: {
+              allowed: true,
+              assigned_exercise_id: mockedState.generatedExercise.id,
+              remaining_swaps: null,
+            },
+            error: null,
+          };
+        }
+
+        return {
+          data: {
+            allowed: false,
+            reason: 'no_alternative_candidates',
+            assigned_exercise_id: mockedState.generatedExercise.id,
+            remaining_swaps: null,
+          },
+          error: null,
+        };
+      }),
+    },
   },
 }));
 
@@ -89,6 +130,7 @@ vi.mock('../../lib/exerciseGenerator', async () => {
 
 describe('Dashboard recommendations', () => {
   beforeEach(() => {
+    mockedState.swapUsed = false;
     mockedState.exerciseRows = [
       {
         id: 'approved-1',
@@ -135,6 +177,9 @@ describe('Dashboard recommendations', () => {
     );
 
     expect(screen.queryByText('Pending Review Exercise')).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Approved Mobility/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Swap Snack/i }));
     expect(await screen.findByRole('button', { name: /Generated Office Reset/i })).toBeInTheDocument();
     expect(screen.getByText('Matches your 5-minute target')).toBeInTheDocument();
     expect(screen.getByText('Low-sweat and work-friendly')).toBeInTheDocument();
