@@ -135,6 +135,9 @@ function App() {
     ]);
 
     if (error) {
+      if (error.code === 'PGRST116') {
+        return false;
+      }
       setProfileLoadError(error.message);
       return false;
     }

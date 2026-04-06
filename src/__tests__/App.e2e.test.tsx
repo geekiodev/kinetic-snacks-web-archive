@@ -179,6 +179,7 @@ describe('App end-to-end orchestration', () => {
     await user.click(screen.getByRole('button', { name: 'Get Started' }));
     await user.click(screen.getByRole('button', { name: 'Complete Sign In' }));
     await screen.findByText('Onboarding Screen');
+    expect(screen.queryByText('Unable to load your profile. Please check your Supabase settings and try again.')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Finish Onboarding' }));
     await screen.findByText('Pricing Screen');
