@@ -1463,3 +1463,41 @@ values
     'jump-rope-single-leg-skill-primer'
   )
 ;
+
+insert into public.notification_policy_config (
+  id,
+  max_daily_notifications_free,
+  max_daily_notifications_premium,
+  ignored_backoff_threshold,
+  ignored_backoff_daily_cap,
+  wake_buffer_minutes,
+  bed_buffer_minutes,
+  quiet_hours_default_enabled,
+  quiet_hours_default_start,
+  quiet_hours_default_end,
+  updated_at
+)
+values (
+  'global',
+  2,
+  4,
+  3,
+  1,
+  45,
+  60,
+  true,
+  '21:30',
+  '07:00',
+  now()
+)
+on conflict (id) do update set
+  max_daily_notifications_free = excluded.max_daily_notifications_free,
+  max_daily_notifications_premium = excluded.max_daily_notifications_premium,
+  ignored_backoff_threshold = excluded.ignored_backoff_threshold,
+  ignored_backoff_daily_cap = excluded.ignored_backoff_daily_cap,
+  wake_buffer_minutes = excluded.wake_buffer_minutes,
+  bed_buffer_minutes = excluded.bed_buffer_minutes,
+  quiet_hours_default_enabled = excluded.quiet_hours_default_enabled,
+  quiet_hours_default_start = excluded.quiet_hours_default_start,
+  quiet_hours_default_end = excluded.quiet_hours_default_end,
+  updated_at = now();
