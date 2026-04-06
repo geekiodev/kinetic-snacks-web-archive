@@ -41,17 +41,9 @@ mockedState.fromMock.mockImplementation((table: string) => {
     return {
       select: vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: vi.fn().mockImplementation(async () => {
+          maybeSingle: vi.fn().mockImplementation(async () => {
             if (mockedState.profileSelectError) {
-              return { data: {
-            push_enabled: true,
-            timezone: 'UTC',
-            quiet_hours_enabled: true,
-            quiet_start_local: '21:30',
-            quiet_end_local: '07:00',
-            reminder_window: 'anytime',
-            max_daily_notifications_override: null,
-          }, error: { message: mockedState.profileSelectError } };
+              return { data: null, error: { message: mockedState.profileSelectError } };
             }
 
             return {

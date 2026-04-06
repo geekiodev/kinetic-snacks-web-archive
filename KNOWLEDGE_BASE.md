@@ -8,7 +8,7 @@
 - Add new learnings, patterns, and anti-patterns as discovered
 - Archive verbose details to `KNOWLEDGE_BASE_ARCHIVE.md` when main file grows too large
 
-**Last Updated:** 2026-04-06 - Edge notification pipeline (plan, dispatch, feedback) and client wiring
+**Last Updated:** 2026-04-07 - Profile load resilience and notification_preferences timezone repair migration
 
 ---
 
@@ -184,6 +184,11 @@ This section mirrors `docs/API_SURFACE.md`.
 ---
 
 ## 📝 Update Log
+
+### **2026-04-07 - Profile load 400 / banner fix**
+- **Cause:** `profiles` used `.single()` (error when no row); `notification_preferences` select listed `timezone` before a repaired DB had that column → PostgREST 400.
+- **Fix:** `maybeSingle()` for profiles; omit `timezone` from read select (still sent on upsert); migration `20260407200000_ensure_notification_preferences_timezone.sql` idempotently adds column.
+- **Key Learning:** If a migration file is edited after it was applied remotely, add a new migration for deltas instead of relying on a re-run.
 
 ### **2026-04-06 - Notifications (DB, Edge, client)**
 - **DB:** `notification_preferences`, `notification_policy_config`, migration `20260406110000_notification_preferences_and_policy.sql` (file was amended after first apply; if the remote was migrated earlier, diff SQL against prod or re-verify objects match repo).

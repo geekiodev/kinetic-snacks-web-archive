@@ -26,7 +26,8 @@ export interface UserPreferences {
 
 interface NotificationPreferencesRow {
   push_enabled: boolean;
-  timezone: string;
+  /** Present on write and when DB has been migrated; optional on read for older schemas. */
+  timezone?: string;
   quiet_hours_enabled: boolean;
   quiet_start_local: string;
   quiet_end_local: string;
@@ -126,10 +127,12 @@ function App() {
         .from('profiles')
         .select('preferences')
         .eq('id', userId)
-        .single(),
+        .maybeSingle(),
       supabase
         .from('notification_preferences')
-        .select('push_enabled,timezone,quiet_hours_enabled,quiet_start_local,quiet_end_local,reminder_window,max_daily_notifications_override')
+        .select(
+          'push_enabled,quiet_hours_enabled,quiet_start_local,quiet_end_local,reminder_window,max_daily_notifications_override',
+        )
         .eq('user_id', userId)
         .maybeSingle(),
     ]);
