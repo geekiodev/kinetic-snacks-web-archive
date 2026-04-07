@@ -43,7 +43,7 @@ which actions are direct database writes vs. required Edge Functions.
 ### allow-snack-assignment
 - **Purpose:** Authoritative daily snack assignment + manual swap metering.
 - **Input:** `{ day_key?: string, swap?: boolean, candidate_exercise_ids: string[] }`
-- **Output:** `{ allowed?: boolean, assignment_id: string | null, assigned_exercise_id: string | null, reason?: string, remaining_assignments: number | null, remaining_swaps: number | null }`
+- **Output:** `{ allowed?: boolean, assignment_id: string | null, assigned_exercise_id: string | null, reason?: string, assignment_limit: number | null, swap_limit: number | null, remaining_assignments: number | null, remaining_swaps: number | null }`
 - **Notes:** Persists assignments in `daily_snack_assignments`; idempotent read for existing daily assignment when `swap` is false.
 
 

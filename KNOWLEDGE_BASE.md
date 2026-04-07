@@ -8,7 +8,7 @@
 - Add new learnings, patterns, and anti-patterns as discovered
 - Archive verbose details to `KNOWLEDGE_BASE_ARCHIVE.md` when main file grows too large
 
-**Last Updated:** 2026-04-06 - Backend-authoritative autopilot assignment + swap metering
+**Last Updated:** 2026-04-07 - Autopilot quota banner aligned to assignment metrics
 
 ---
 
@@ -75,7 +75,7 @@ This section mirrors `docs/API_SURFACE.md`.
 #### allow-snack-assignment
 - **Purpose:** Authoritative daily snack assignment + manual swap metering.
 - **Input:** `{ day_key?: string, swap?: boolean, candidate_exercise_ids: string[] }`
-- **Output:** `{ allowed?: boolean, assignment_id: string | null, assigned_exercise_id: string | null, reason?: string, remaining_assignments: number | null, remaining_swaps: number | null }`
+- **Output:** `{ allowed?: boolean, assignment_id: string | null, assigned_exercise_id: string | null, reason?: string, assignment_limit: number | null, swap_limit: number | null, remaining_assignments: number | null, remaining_swaps: number | null }`
 - **Notes:** Writes to `daily_snack_assignments`; returns existing assignment for idempotent non-swap calls.
 
 #### notifications-plan
@@ -222,6 +222,11 @@ This section mirrors `docs/API_SURFACE.md`.
 - **Client:** Dashboard now requests assignment/swap decisions from Edge (`allow-snack-assignment`) instead of purely local selection/swap state.
 - **QA:** Added unit tests for new usage logic and updated Dashboard tests to mock assignment/swap function behavior.
 - **Key Learning:** Autopilot UX should be stateless on the client and stateful in Edge + ledger tables for deterministic behavior.
+
+### **2026-04-07 - Upgrade banner metric alignment**
+- **Issue:** Upgrade banner still displayed legacy copy (`free exercises remaining`) while autopilot now meters assignment/swap actions.
+- **Fix:** Dashboard now sources banner remaining/limit from `allow-snack-assignment` (`remaining_assignments`, `assignment_limit`) and labels it as `free auto-snack assignments`.
+- **Key Learning:** Monetization copy must match the active ledger semantics, or users lose trust in quota messaging.
 
 ### **2026-04-06 - Notifications (DB, Edge, client)**
 - **DB:** `notification_preferences`, `notification_policy_config`, migration `20260406110000_notification_preferences_and_policy.sql` (file was amended after first apply; if the remote was migrated earlier, diff SQL against prod or re-verify objects match repo).

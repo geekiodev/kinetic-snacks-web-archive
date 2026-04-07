@@ -146,34 +146,6 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
   }, [userId]);
 
   useEffect(() => {
-    const loadFreeUsage = async () => {
-      if (!userId || isPremium) {
-        setFreeRemaining(null);
-        return;
-      }
-
-      const { data, error } = await supabase.functions.invoke('allow-exercise-view', {
-        body: { peek: true },
-      });
-
-      if (error || !data) {
-        setFreeRemaining(null);
-        return;
-      }
-
-      const limit = Number(data.limit);
-      const remaining = data.remaining === null ? null : Number(data.remaining);
-      if (Number.isFinite(limit)) {
-        setFreeLimit(limit);
-      }
-      setFreeRemaining(remaining);
-    };
-
-    void loadFreeUsage();
-  }, [userId, isPremium, freeLimit]);
-
-
-  useEffect(() => {
     const loadNudgePreview = async () => {
       if (!userId) {
         setNudgeStatus(null);
@@ -353,6 +325,7 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
       if (!userId) {
         setAssignedExerciseId(exercises[0].id);
         setManualSwapsRemaining(1);
+        setFreeRemaining(null);
         return;
       }
 
@@ -373,6 +346,15 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
         setAssignedExerciseId(data.assigned_exercise_id);
       } else {
         setAssignedExerciseId(exercises[0].id);
+      }
+
+      if (typeof data.assignment_limit === 'number') {
+        setFreeLimit(data.assignment_limit);
+      }
+      if (typeof data.remaining_assignments === 'number') {
+        setFreeRemaining(data.remaining_assignments);
+      } else if (data.remaining_assignments === null) {
+        setFreeRemaining(null);
       }
 
       if (typeof data.remaining_swaps === 'number') {
@@ -473,6 +455,14 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
         setManualSwapsRemaining(data.remaining_swaps);
       } else if (data.remaining_swaps === null) {
         setManualSwapsRemaining(null);
+      }
+      if (typeof data.assignment_limit === 'number') {
+        setFreeLimit(data.assignment_limit);
+      }
+      if (typeof data.remaining_assignments === 'number') {
+        setFreeRemaining(data.remaining_assignments);
+      } else if (data.remaining_assignments === null) {
+        setFreeRemaining(null);
       }
 
       setExerciseError('');
@@ -599,10 +589,10 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
                   </div>
                   <p className="text-white/95 text-sm sm:text-base mb-3">
                     {freeRemaining === null
-                      ? `Free usage resets daily. Get unlimited access with Premium.`
+                      ? `Autopilot quotas reset daily. Get unlimited access with Premium.`
                       : freeRemaining > 0
-                        ? `${freeRemaining} of ${freeLimit} free exercises remaining today. Get unlimited access!`
-                        : `You've reached your daily limit. Upgrade for unlimited exercises!`
+                        ? `${freeRemaining} of ${freeLimit} free auto-snack assignments remaining today.`
+                        : `You've reached your free auto-snack assignment limit for today.`
                     }
                   </p>
                   <ul className="space-y-1.5">
