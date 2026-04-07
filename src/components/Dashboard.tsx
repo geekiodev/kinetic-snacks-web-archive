@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import {
   Clock,
   Calendar,
-  Shuffle,
   Settings,
   Camera,
   Zap,
@@ -41,6 +40,9 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
   const [isLoadingExercises, setIsLoadingExercises] = useState(false);
   const [exerciseError, setExerciseError] = useState('');
   const [nudgeStatus, setNudgeStatus] = useState<string | null>(null);
+  const [assignedExerciseId, setAssignedExerciseId] = useState<string | null>(null);
+  const [manualSwapsRemaining, setManualSwapsRemaining] = useState<number | null>(1);
+  const [isAssigningSnack, setIsAssigningSnack] = useState(false);
 
   const isPremium = subscriptionPlan === 'premium';
 
@@ -142,34 +144,6 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
 
     void loadStats();
   }, [userId]);
-
-  useEffect(() => {
-    const loadFreeUsage = async () => {
-      if (!userId || isPremium) {
-        setFreeRemaining(null);
-        return;
-      }
-
-      const { data, error } = await supabase.functions.invoke('allow-exercise-view', {
-        body: { peek: true },
-      });
-
-      if (error || !data) {
-        setFreeRemaining(null);
-        return;
-      }
-
-      const limit = Number(data.limit);
-      const remaining = data.remaining === null ? null : Number(data.remaining);
-      if (Number.isFinite(limit)) {
-        setFreeLimit(limit);
-      }
-      setFreeRemaining(remaining);
-    };
-
-    void loadFreeUsage();
-  }, [userId, isPremium, freeLimit]);
-
 
   useEffect(() => {
     const loadNudgePreview = async () => {
@@ -341,6 +315,58 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
     void loadExercises();
   }, [hasLoadedStats, userPreferences, recentCompletions]);
 
+  useEffect(() => {
+    const assignSnack = async () => {
+      if (exercises.length === 0) {
+        setAssignedExerciseId(null);
+        return;
+      }
+
+      if (!userId) {
+        setAssignedExerciseId(exercises[0].id);
+        setManualSwapsRemaining(1);
+        setFreeRemaining(null);
+        return;
+      }
+
+      const { data, error } = await supabase.functions.invoke('allow-snack-assignment', {
+        body: {
+          day_key: new Date().toISOString().slice(0, 10),
+          candidate_exercise_ids: exercises.map((exercise) => exercise.id),
+          swap: false,
+        },
+      });
+
+      if (error || !data) {
+        setAssignedExerciseId(exercises[0].id);
+        return;
+      }
+
+      if (typeof data.assigned_exercise_id === 'string') {
+        setAssignedExerciseId(data.assigned_exercise_id);
+      } else {
+        setAssignedExerciseId(exercises[0].id);
+      }
+
+      if (typeof data.assignment_limit === 'number') {
+        setFreeLimit(data.assignment_limit);
+      }
+      if (typeof data.remaining_assignments === 'number') {
+        setFreeRemaining(data.remaining_assignments);
+      } else if (data.remaining_assignments === null) {
+        setFreeRemaining(null);
+      }
+
+      if (typeof data.remaining_swaps === 'number') {
+        setManualSwapsRemaining(data.remaining_swaps);
+      } else if (data.remaining_swaps === null) {
+        setManualSwapsRemaining(null);
+      }
+    };
+
+    void assignSnack();
+  }, [exercises, userId]);
+
   const ensureSession = async (attempts = 2, delayMs = 300) => {
     for (let i = 0; i < attempts; i += 1) {
       const { data } = await supabase.auth.getSession();
@@ -377,86 +403,73 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
     return false;
   };
 
-  const requestViewPermission = async (exerciseId: string) => {
-    if (isPremium) {
-      return true;
+  const assignedExercise = exercises.find((exercise) => exercise.id === assignedExerciseId) ?? exercises[0] ?? null;
+
+  const handleStartAssignedSnack = () => {
+    if (!assignedExercise) {
+      return;
     }
 
-    if (!userId) {
-      onUpgrade();
-      return false;
+    // Autopilot assignment should not consume browse-style free-tier view quota.
+    onViewExercise(assignedExercise);
+  };
+
+  const handleSwapAssignedSnack = () => {
+    if (exercises.length < 2 || !assignedExercise || isAssigningSnack) {
+      return;
     }
 
-    const hasSession = await ensureSession();
-    if (!hasSession) {
-      setExerciseError('Please sign in again to verify access.');
-      return false;
+    if (!isPremium && manualSwapsRemaining !== null && manualSwapsRemaining <= 0) {
+      setExerciseError('You have used your free daily swap. Upgrade for unlimited swaps.');
+      return;
     }
 
-    const { data, error } = await supabase.functions.invoke('allow-exercise-view', {
-      body: { exercise_id: exerciseId },
-    });
-
-    if (error && error.message?.includes('401')) {
-      await supabase.auth.refreshSession();
-      const retry = await supabase.functions.invoke('allow-exercise-view', {
-        body: { exercise_id: exerciseId },
+    const requestSwap = async () => {
+      setIsAssigningSnack(true);
+      const { data, error } = await supabase.functions.invoke('allow-snack-assignment', {
+        body: {
+          day_key: new Date().toISOString().slice(0, 10),
+          candidate_exercise_ids: exercises.map((exercise) => exercise.id),
+          swap: true,
+        },
       });
-      if (retry.error || !retry.data) {
-        setExerciseError(retry.error?.message || 'Unable to verify free-tier usage.');
-        return false;
+
+      if (error || !data) {
+        setExerciseError(error?.message || 'Unable to swap snack right now.');
+        setIsAssigningSnack(false);
+        return;
       }
-      const limit = Number(retry.data.limit);
-      const remaining = retry.data.remaining === null ? null : Number(retry.data.remaining);
-      if (Number.isFinite(limit)) {
-        setFreeLimit(limit);
+
+      if (data.allowed === false && data.reason === 'swap_limit_reached') {
+        setExerciseError('You have used your free daily swap. Upgrade for unlimited swaps.');
+        setManualSwapsRemaining(0);
+        setIsAssigningSnack(false);
+        return;
       }
-      setFreeRemaining(remaining);
-      if (!retry.data.allowed) {
-        onUpgrade();
-        return false;
+
+      if (typeof data.assigned_exercise_id === 'string') {
+        setAssignedExerciseId(data.assigned_exercise_id);
       }
-      return true;
-    }
 
-    if (error || !data) {
-      setExerciseError(error?.message || 'Unable to verify free-tier usage.');
-      return false;
-    }
+      if (typeof data.remaining_swaps === 'number') {
+        setManualSwapsRemaining(data.remaining_swaps);
+      } else if (data.remaining_swaps === null) {
+        setManualSwapsRemaining(null);
+      }
+      if (typeof data.assignment_limit === 'number') {
+        setFreeLimit(data.assignment_limit);
+      }
+      if (typeof data.remaining_assignments === 'number') {
+        setFreeRemaining(data.remaining_assignments);
+      } else if (data.remaining_assignments === null) {
+        setFreeRemaining(null);
+      }
 
-    const limit = Number(data.limit);
-    const remaining = data.remaining === null ? null : Number(data.remaining);
-    if (Number.isFinite(limit)) {
-      setFreeLimit(limit);
-    }
-    setFreeRemaining(remaining);
+      setExerciseError('');
+      setIsAssigningSnack(false);
+    };
 
-    if (!data.allowed) {
-      onUpgrade();
-      return false;
-    }
-
-    return true;
-  };
-
-  const handleExerciseClick = async (exercise: Exercise) => {
-    const allowed = await requestViewPermission(exercise.id);
-    if (!allowed) {
-      return;
-    }
-    onViewExercise(exercise);
-  };
-
-  const handleRouletteMode = async () => {
-    if (exercises.length === 0) {
-      return;
-    }
-    const randomExercise = exercises[Math.floor(Math.random() * exercises.length)];
-    const allowed = await requestViewPermission(randomExercise.id);
-    if (!allowed) {
-      return;
-    }
-    onViewExercise(randomExercise);
+    void requestSwap();
   };
 
   const handleSpaceAnalysis = async () => {
@@ -576,10 +589,10 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
                   </div>
                   <p className="text-white/95 text-sm sm:text-base mb-3">
                     {freeRemaining === null
-                      ? `Free usage resets daily. Get unlimited access with Premium.`
+                      ? `Autopilot quotas reset daily. Get unlimited access with Premium.`
                       : freeRemaining > 0
-                        ? `${freeRemaining} of ${freeLimit} free exercises remaining today. Get unlimited access!`
-                        : `You've reached your daily limit. Upgrade for unlimited exercises!`
+                        ? `${freeRemaining} of ${freeLimit} free auto-snack assignments remaining today.`
+                        : `You've reached your free auto-snack assignment limit for today.`
                     }
                   </p>
                   <ul className="space-y-1.5">
@@ -633,23 +646,24 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
         {/* Quick Actions */}
         <div className="grid sm:grid-cols-2 gap-3 sm:gap-4 mb-6 sm:mb-8">
           <button
-            onClick={handleRouletteMode}
+            onClick={handleStartAssignedSnack}
             className="touch-target group relative overflow-hidden bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 active:scale-95 text-white rounded-2xl p-5 sm:p-6 transition-smooth hover:scale-[1.02] hover:-translate-y-1 shadow-lg hover:shadow-xl text-left"
+            disabled={!assignedExercise}
           >
             <div className="relative flex items-center justify-between">
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <div className="bg-white/20 p-1.5 sm:p-2 rounded-lg group-hover:scale-110 transition-smooth">
-                    <Shuffle className="w-5 h-5 sm:w-6 sm:h-6" />
+                    <Zap className="w-5 h-5 sm:w-6 sm:h-6" />
                   </div>
-                  <h3 className="text-lg sm:text-xl font-bold">Surprise Me</h3>
+                  <h3 className="text-lg sm:text-xl font-bold">Start Auto Snack</h3>
                 </div>
                 <p className="text-white/95 text-xs sm:text-sm">
-                  Get a random snack right now
+                  Jump straight into today&apos;s assigned snack
                 </p>
               </div>
               <div className="text-3xl sm:text-4xl opacity-50 group-hover:opacity-75 transition-smooth">
-                🎲
+                ⚡
               </div>
             </div>
           </button>
@@ -708,10 +722,10 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
         <div className="space-y-4">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-bold text-slate-900">
-              Today's Movement Timeline
+              Today&apos;s Auto-Assigned Snack
             </h2>
             <span className="text-sm text-slate-500 font-medium">
-              {exercises.length} snacks scheduled
+              {assignedExercise ? 'Autopilot active' : 'No snack available'}
             </span>
           </div>
 
@@ -722,18 +736,32 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
             {!isLoadingExercises && exerciseError && (
               <div className="text-sm text-red-600">{exerciseError}</div>
             )}
-              {!isLoadingExercises && !exerciseError && exercises.map((exercise, index) => {
-                const isLocked = !isPremium && freeRemaining === 0;
-              return (
-                <ExerciseCard
-                  key={exercise.id}
-                  exercise={exercise}
-                    onClick={() => isLocked ? onUpgrade() : handleExerciseClick(exercise)}
-                    index={index}
-                  isLocked={isLocked}
-                />
-              );
-            })}
+            {!isLoadingExercises && !exerciseError && assignedExercise && (
+              <ExerciseCard
+                exercise={assignedExercise}
+                onClick={handleStartAssignedSnack}
+                index={0}
+                isAutopilot
+              />
+            )}
+            {!isLoadingExercises && !exerciseError && assignedExercise && exercises.length > 1 && (
+              <div className="flex items-center justify-between rounded-xl border border-stone-200 bg-white px-4 py-3">
+                <p className="text-sm text-slate-600">
+                  Want a different snack?
+                </p>
+                <button
+                  type="button"
+                  onClick={handleSwapAssignedSnack}
+                  disabled={isAssigningSnack}
+                  className="rounded-lg bg-stone-900 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800"
+                >
+                  {isAssigningSnack ? 'Swapping...' : `Swap Snack ${!isPremium && manualSwapsRemaining !== null ? `(${manualSwapsRemaining} left)` : ''}`}
+                </button>
+              </div>
+            )}
+            {!isLoadingExercises && !exerciseError && !assignedExercise && (
+              <div className="text-sm text-slate-500">No matching snacks found. Update preferences to broaden options.</div>
+            )}
           </div>
         </div>
 
@@ -784,9 +812,10 @@ interface ExerciseCardProps {
   onClick: () => void;
   index: number;
   isLocked?: boolean;
+  isAutopilot?: boolean;
 }
 
-function ExerciseCard({ exercise, onClick, index, isLocked }: ExerciseCardProps) {
+function ExerciseCard({ exercise, onClick, index, isLocked, isAutopilot = false }: ExerciseCardProps) {
   return (
     <button
       onClick={onClick}
@@ -825,6 +854,12 @@ function ExerciseCard({ exercise, onClick, index, isLocked }: ExerciseCardProps)
             {exercise.title}
           </h3>
 
+          {isAutopilot && (
+            <span className="mb-2 inline-flex rounded-full border border-orange-200 bg-orange-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-orange-700">
+              Auto-picked for you
+            </span>
+          )}
+
           <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-slate-600 flex-wrap mb-2 sm:mb-3">
             <span className="flex items-center gap-1 font-medium">
               <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -862,7 +897,7 @@ function ExerciseCard({ exercise, onClick, index, isLocked }: ExerciseCardProps)
       </div>
 
       <div className="flex items-center text-xs sm:text-sm font-semibold text-orange-600 group-hover:text-orange-700">
-        Start Exercise →
+        Start Snack →
       </div>
     </button>
   );
