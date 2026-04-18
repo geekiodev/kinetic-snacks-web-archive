@@ -32,6 +32,7 @@ const mockedState = vi.hoisted(() => ({
   profileUpdateMock: vi.fn().mockResolvedValue({ error: null }),
   completionInsertMock: vi.fn().mockResolvedValue({ error: null }),
   signOutMock: vi.fn().mockResolvedValue({ error: null }),
+  notificationUpsertMock: vi.fn().mockResolvedValue({ error: null }),
   fromMock: vi.fn(),
 }));
 
@@ -40,7 +41,7 @@ mockedState.fromMock.mockImplementation((table: string) => {
     return {
       select: vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: vi.fn().mockImplementation(async () => {
+          maybeSingle: vi.fn().mockImplementation(async () => {
             if (mockedState.profileSelectError) {
               return { data: null, error: { message: mockedState.profileSelectError } };
             }
@@ -59,6 +60,20 @@ mockedState.fromMock.mockImplementation((table: string) => {
   if (table === 'exercise_completions') {
     return {
       insert: mockedState.completionInsertMock,
+    };
+  }
+
+  if (table === 'notification_preferences') {
+    return {
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: null,
+            error: null,
+          }),
+        })),
+      })),
+      upsert: mockedState.notificationUpsertMock,
     };
   }
 
@@ -144,6 +159,7 @@ describe('App end-to-end orchestration', () => {
     mockedState.completionInsertMock.mockClear();
     mockedState.profileUpdateMock.mockClear();
     mockedState.signOutMock.mockClear();
+    mockedState.notificationUpsertMock.mockClear();
     window.localStorage.clear();
   });
 
@@ -155,6 +171,7 @@ describe('App end-to-end orchestration', () => {
     await user.click(screen.getByRole('button', { name: 'Get Started' }));
     await user.click(screen.getByRole('button', { name: 'Complete Sign In' }));
     await screen.findByText('Onboarding Screen');
+    expect(screen.queryByText('Unable to load your profile. Please check your Supabase settings and try again.')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Finish Onboarding' }));
     await screen.findByText('Pricing Screen');
@@ -175,6 +192,7 @@ describe('App end-to-end orchestration', () => {
 
     await user.click(screen.getByRole('button', { name: 'Save Settings' }));
     await waitFor(() => expect(mockedState.profileUpdateMock).toHaveBeenCalledWith('id', 'user-1'));
+    await waitFor(() => expect(mockedState.notificationUpsertMock).toHaveBeenCalledWith(expect.objectContaining({ user_id: 'user-1' })));
     await screen.findByText('Dashboard Screen');
 
     await user.click(screen.getByRole('button', { name: 'Open Settings' }));

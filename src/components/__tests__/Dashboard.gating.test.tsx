@@ -13,10 +13,62 @@ const mockedState = vi.hoisted(() => {
     tips: 'Stay smooth.',
     category: 'mobility',
   };
+  const backupExercise = {
+    ...exercise,
+    id: 'ex-2',
+    title: 'Backup Snack',
+  };
 
-  const invokeMock = vi.fn().mockResolvedValue({
-    data: { allowed: false, remaining: 0, limit: 3 },
-    error: null,
+  let swapUsed = false;
+
+  const invokeMock = vi.fn().mockImplementation(async (fnName: string, payload?: { body?: { swap?: boolean } }) => {
+    if (fnName === 'notifications-plan') {
+      return {
+        data: { send_now: false, reason: 'quiet_hours', nudge_type: null },
+        error: null,
+      };
+    }
+
+    if (fnName === 'allow-snack-assignment') {
+      const isSwap = payload?.body?.swap === true;
+      if (!isSwap) {
+        return {
+          data: {
+            allowed: true,
+            assigned_exercise_id: exercise.id,
+            remaining_swaps: swapUsed ? 0 : 1,
+          },
+          error: null,
+        };
+      }
+
+      if (!swapUsed) {
+        swapUsed = true;
+        return {
+          data: {
+            allowed: true,
+            assigned_exercise_id: backupExercise.id,
+            remaining_swaps: 0,
+          },
+          error: null,
+        };
+      }
+
+      return {
+        data: {
+          allowed: false,
+          reason: 'swap_limit_reached',
+          assigned_exercise_id: backupExercise.id,
+          remaining_swaps: 0,
+        },
+        error: null,
+      };
+    }
+
+    return {
+      data: { allowed: false, remaining: 0, limit: 3 },
+      error: null,
+    };
   });
 
   const fromMock = vi.fn((table: string) => {
@@ -31,7 +83,7 @@ const mockedState = vi.hoisted(() => {
     if (table === 'exercises') {
       return {
         select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockResolvedValue({ data: [exercise], error: null }),
+        eq: vi.fn().mockResolvedValue({ data: [exercise, backupExercise], error: null }),
       };
     }
 
@@ -53,7 +105,7 @@ const mockedState = vi.hoisted(() => {
     };
   });
 
-  return { exercise, invokeMock, fromMock };
+  return { exercise, backupExercise, invokeMock, fromMock };
 });
 
 vi.mock('../../lib/supabase', () => ({
@@ -80,7 +132,7 @@ vi.mock('../../lib/exerciseGenerator', () => ({
 }));
 
 describe('Dashboard free-tier gating', () => {
-  it('prompts upgrade when edge denies a view', async () => {
+  it('lets users open auto-assigned snack without consuming view checks and enforces one free manual swap', async () => {
     const onUpgrade = vi.fn();
     const onViewExercise = vi.fn();
 
@@ -101,11 +153,27 @@ describe('Dashboard free-tier gating', () => {
       />,
     );
 
+    expect(await screen.findByText(/Quiet hours are active/i)).toBeInTheDocument();
+    expect(mockedState.invokeMock).toHaveBeenCalledWith('notifications-plan', expect.objectContaining({
+      body: expect.objectContaining({ dry_run: true }),
+    }));
+
     const card = await screen.findByRole('button', { name: /Test Snack/i });
     fireEvent.click(card);
 
-    await waitFor(() => expect(mockedState.invokeMock).toHaveBeenCalled());
-    expect(onUpgrade).toHaveBeenCalled();
-    expect(onViewExercise).not.toHaveBeenCalled();
+    expect(onUpgrade).not.toHaveBeenCalled();
+    expect(onViewExercise).toHaveBeenCalledWith(expect.objectContaining({ id: 'ex-1' }));
+
+    const swapButton = screen.getByRole('button', { name: /Swap Snack/i });
+    fireEvent.click(swapButton);
+    await waitFor(() => {
+      expect(screen.getByText(/Backup Snack/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/0 left/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Swap Snack/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/used your free daily swap/i)).toBeInTheDocument();
+    });
   });
 });

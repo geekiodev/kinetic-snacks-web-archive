@@ -21,6 +21,8 @@
 
 - Store user preferences in `profiles.preferences` (jsonb)
 - Store completions in `exercise_completions`
+- Notification UX and persistence: `notification_preferences` (Supabase) + `normalizeNotificationSettings()` in `src/lib/notificationSettings.ts` before read/write
+- Nudge send decisions, worker queue, and engagement: Edge `notifications-plan` (incl. `dry_run`), `notifications-dispatch`, `notifications-feedback` (see `docs/API_SURFACE.md`)
 
 ---
 
@@ -32,7 +34,7 @@
 
 ## ✅ Always Do These
 
-- Update knowledge base after significant work.
+- Update knowledge base after significant work (including after pulling or merging upstream changes that add features, migrations, or API surface).
 - Add RLS policies for new tables.
 
 ---
