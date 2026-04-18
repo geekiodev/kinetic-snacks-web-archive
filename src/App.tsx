@@ -97,6 +97,8 @@ export interface Exercise {
 function App() {
   const [currentView, setCurrentView] = useState<View>('landing');
   const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null);
+  const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
+  const [completedSlotId, setCompletedSlotId] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [subscriptionPlan, setSubscriptionPlan] = useState<SubscriptionPlan>('free');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -372,6 +374,14 @@ function App() {
     if (error) {
       throw new Error(error.message);
     }
+
+    if (selectedSlotId) {
+      await supabase
+        .from('daily_snack_assignments')
+        .update({ status: 'completed' })
+        .eq('id', selectedSlotId);
+      setCompletedSlotId(selectedSlotId);
+    }
   };
 
   const handleUpgradeToPremium = () => {
@@ -425,12 +435,16 @@ function App() {
 
       {currentView === 'dashboard' && (
         <Dashboard
-          onViewExercise={(exercise) => handleViewChange('exercise', exercise)}
+          onViewExercise={(exercise, slotId) => {
+            setSelectedSlotId(slotId ?? null);
+            handleViewChange('exercise', exercise);
+          }}
           onNavigate={handleViewChange}
           userId={user?.id || null}
           userPreferences={userPreferences}
           subscriptionPlan={subscriptionPlan}
           onUpgrade={handleUpgradeToPremium}
+          completedSlotId={completedSlotId}
         />
       )}
 

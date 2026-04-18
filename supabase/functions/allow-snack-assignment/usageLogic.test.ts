@@ -1,22 +1,43 @@
 import { describe, expect, it } from 'vitest';
-import { canCreateAssignment, canUseSwap, getRemaining } from './usageLogic.ts';
+import { canUseSwap, getRemaining, slotsNeededToday } from './usageLogic.ts';
 
 describe('allow-snack-assignment usage logic', () => {
-  it('handles unlimited limits', () => {
-    expect(canCreateAssignment({ assignmentLimit: null, assignmentsUsed: 999 })).toBe(true);
-    expect(canUseSwap({ swapLimit: null, swapsUsed: 999 })).toBe(true);
-    expect(getRemaining(null, 3)).toBeNull();
+  describe('getRemaining', () => {
+    it('returns null for unlimited', () => {
+      expect(getRemaining(null, 99)).toBeNull();
+    });
+    it('returns correct remaining count', () => {
+      expect(getRemaining(5, 2)).toBe(3);
+    });
+    it('does not go below zero', () => {
+      expect(getRemaining(3, 5)).toBe(0);
+    });
   });
 
-  it('enforces finite assignment limit', () => {
-    expect(canCreateAssignment({ assignmentLimit: 2, assignmentsUsed: 1 })).toBe(true);
-    expect(canCreateAssignment({ assignmentLimit: 2, assignmentsUsed: 2 })).toBe(false);
-    expect(getRemaining(2, 1)).toBe(1);
+  describe('slotsNeededToday', () => {
+    it('returns 0 when premium (null limit)', () => {
+      expect(slotsNeededToday({ slotLimit: null, slotsPlanned: 0 })).toBe(0);
+    });
+    it('returns the gap between limit and planned', () => {
+      expect(slotsNeededToday({ slotLimit: 3, slotsPlanned: 1 })).toBe(2);
+    });
+    it('returns 0 when already at limit', () => {
+      expect(slotsNeededToday({ slotLimit: 3, slotsPlanned: 3 })).toBe(0);
+    });
+    it('returns 0 when over limit (config decreased mid-day)', () => {
+      expect(slotsNeededToday({ slotLimit: 2, slotsPlanned: 5 })).toBe(0);
+    });
   });
 
-  it('enforces finite swap limit', () => {
-    expect(canUseSwap({ swapLimit: 1, swapsUsed: 0 })).toBe(true);
-    expect(canUseSwap({ swapLimit: 1, swapsUsed: 1 })).toBe(false);
-    expect(getRemaining(1, 1)).toBe(0);
+  describe('canUseSwap', () => {
+    it('always allows unlimited swaps', () => {
+      expect(canUseSwap({ swapLimit: null, swapsUsed: 99 })).toBe(true);
+    });
+    it('allows swap when under limit', () => {
+      expect(canUseSwap({ swapLimit: 1, swapsUsed: 0 })).toBe(true);
+    });
+    it('blocks swap at limit', () => {
+      expect(canUseSwap({ swapLimit: 1, swapsUsed: 1 })).toBe(false);
+    });
   });
 });

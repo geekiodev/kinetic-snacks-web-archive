@@ -16,6 +16,7 @@ export type LimitationRuleMap = Record<string, string[]>;
 let cachedRules: LimitationRuleMap | null = null;
 let cachedAt: number | null = null;
 const RULE_CACHE_MS = 5 * 60 * 1000;
+const DURATION_TOLERANCE_MINUTES = 2;
 
 export const loadLimitationRules = async (): Promise<LimitationRuleMap> => {
   if (cachedRules && cachedAt && Date.now() - cachedAt < RULE_CACHE_MS) {
@@ -118,7 +119,7 @@ export const validateExerciseCandidate = (
     return { valid: false, reason: 'Intensity mismatch' };
   }
 
-  if (Number.isFinite(preferences.duration) && candidate.duration > preferences.duration + 2) {
+  if (Number.isFinite(preferences.duration) && candidate.duration > preferences.duration + DURATION_TOLERANCE_MINUTES) {
     return { valid: false, reason: 'Duration too long' };
   }
 

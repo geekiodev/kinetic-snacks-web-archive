@@ -1,6 +1,6 @@
-export interface AssignmentQuotaInput {
-  assignmentLimit: number | null;
-  assignmentsUsed: number;
+export interface SlotQuotaInput {
+  slotLimit: number | null;
+  slotsPlanned: number;
 }
 
 export interface SwapQuotaInput {
@@ -13,9 +13,9 @@ export const getRemaining = (limit: number | null, used: number): number | null 
   return Math.max(0, limit - used);
 };
 
-export const canCreateAssignment = ({ assignmentLimit, assignmentsUsed }: AssignmentQuotaInput): boolean => {
-  if (assignmentLimit === null) return true;
-  return assignmentsUsed < assignmentLimit;
+export const slotsNeededToday = ({ slotLimit, slotsPlanned }: SlotQuotaInput): number => {
+  if (slotLimit === null) return 0; // premium: plan lazily on demand, not all at once
+  return Math.max(0, slotLimit - slotsPlanned);
 };
 
 export const canUseSwap = ({ swapLimit, swapsUsed }: SwapQuotaInput): boolean => {

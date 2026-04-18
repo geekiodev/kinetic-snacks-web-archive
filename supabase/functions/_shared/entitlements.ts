@@ -1,5 +1,6 @@
 export interface Entitlements {
-  daily_exercise_views: number | null;
+  daily_snack_slots: number | null;
+  daily_swap_slots: number | null;
   can_use_space_analysis: boolean;
   monthly_ai_plans: number | null;
   monthly_exercise_generations: number | null;
@@ -14,7 +15,8 @@ export interface EntitlementContext {
 
 const defaultEntitlementsByPlan: Record<string, Entitlements> = {
   free: {
-    daily_exercise_views: 3,
+    daily_snack_slots: 3,
+    daily_swap_slots: 1,
     can_use_space_analysis: false,
     monthly_ai_plans: 0,
     monthly_exercise_generations: 0,
@@ -22,7 +24,8 @@ const defaultEntitlementsByPlan: Record<string, Entitlements> = {
     max_saved_plans: 1,
   },
   premium: {
-    daily_exercise_views: null,
+    daily_snack_slots: null,
+    daily_swap_slots: null,
     can_use_space_analysis: true,
     monthly_ai_plans: null,
     monthly_exercise_generations: null,

@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Clock,
   Calendar,
+  CheckCircle2,
   Settings,
   Camera,
   Zap,
@@ -17,19 +18,30 @@ import { loadLimitationRules, validateExerciseCandidate } from '../lib/exerciseV
 import { generateExercises, rankExercises } from '../lib/exerciseGenerator';
 
 interface DashboardProps {
-  onViewExercise: (exercise: Exercise) => void;
+  onViewExercise: (exercise: Exercise, slotId?: string) => void;
   onNavigate: (view: View) => void;
   userId: string | null;
   userPreferences: UserPreferences;
   subscriptionPlan: SubscriptionPlan;
   onUpgrade: () => void;
+  completedSlotId?: string | null;
 }
 
-export default function Dashboard({ onViewExercise, onNavigate, userId, userPreferences, subscriptionPlan, onUpgrade }: DashboardProps) {
+const HISTORY_LOOKBACK_DAYS = 30;
+const MIN_EXERCISE_COUNT = 3;
+
+type DaySlot = {
+  id: string;
+  status: string;
+  exercise_id: string;
+  scheduled_at: string | null;
+  scheduled_at_local: string | null;
+  source: string;
+};
+
+export default function Dashboard({ onViewExercise, onNavigate, userId, userPreferences, subscriptionPlan, onUpgrade, completedSlotId }: DashboardProps) {
   const [selectedDate, setSelectedDate] = useState('today');
   const [greeting, setGreeting] = useState('');
-  const [freeRemaining, setFreeRemaining] = useState<number | null>(null);
-  const [freeLimit, setFreeLimit] = useState(3);
   const [currentStreak, setCurrentStreak] = useState(0);
   const [todayCount, setTodayCount] = useState(0);
   const [weeklyCount, setWeeklyCount] = useState(0);
@@ -40,9 +52,14 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
   const [isLoadingExercises, setIsLoadingExercises] = useState(false);
   const [exerciseError, setExerciseError] = useState('');
   const [nudgeStatus, setNudgeStatus] = useState<string | null>(null);
-  const [assignedExerciseId, setAssignedExerciseId] = useState<string | null>(null);
-  const [manualSwapsRemaining, setManualSwapsRemaining] = useState<number | null>(1);
+  const [todaySlots, setTodaySlots] = useState<DaySlot[]>([]);
+  const [activeSlotId, setActiveSlotId] = useState<string | null>(null);
+  const [slotLimit, setSlotLimit] = useState<number | null>(null);
+  const [swapsRemaining, setSwapsRemaining] = useState<number | null>(1);
   const [isAssigningSnack, setIsAssigningSnack] = useState(false);
+  const [planTrigger, setPlanTrigger] = useState(0);
+
+  const isPlanningRef = useRef(false);
 
   const isPremium = subscriptionPlan === 'premium';
 
@@ -71,7 +88,7 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
         .from('exercise_completions')
         .select('exercise_id, completed_at, duration_minutes')
         .eq('user_id', userId)
-        .gte('completed_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+        .gte('completed_at', new Date(Date.now() - HISTORY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString());
 
       if (error || !data) {
         setCurrentStreak(0);
@@ -259,11 +276,10 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
           },
         });
 
-        const minCount = 3;
-        if (ranked.length < minCount) {
+        if (ranked.length < MIN_EXERCISE_COUNT) {
           const generated = await generateExercises({
             preferences: userPreferences,
-            count: minCount - ranked.length,
+            count: MIN_EXERCISE_COUNT - ranked.length,
             history: {
               recentExerciseIds,
               recentVariationKeys,
@@ -273,21 +289,6 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
           const validatedGenerated = generated.filter((exercise) =>
             validateExerciseCandidate(exercise, userPreferences, limitationRules).valid
           );
-          const persistGenerated = false;
-          if (persistGenerated && validatedGenerated.length > 0) {
-            void supabase.from('exercises').insert(
-              validatedGenerated.map((exercise) => ({
-                title: exercise.title,
-                duration_minutes: exercise.duration,
-                intensity: exercise.intensity,
-                equipment: exercise.equipment,
-                instructions: exercise.instructions,
-                tips: exercise.tips,
-                category: exercise.category,
-                is_active: false,
-              }))
-            );
-          }
           setExercises(
             rankExercises({
               preferences: userPreferences,
@@ -316,56 +317,61 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
   }, [hasLoadedStats, userPreferences, recentCompletions]);
 
   useEffect(() => {
-    const assignSnack = async () => {
-      if (exercises.length === 0) {
-        setAssignedExerciseId(null);
-        return;
-      }
+    const loadDayPlan = async () => {
+      if (exercises.length === 0) return;
 
-      if (!userId) {
-        setAssignedExerciseId(exercises[0].id);
-        setManualSwapsRemaining(1);
-        setFreeRemaining(null);
-        return;
-      }
+      // In-flight guard: prevent concurrent calls (e.g. from rapid exercises
+      // state updates), but allow re-runs once the current call completes so
+      // that config changes in the DB are always picked up.
+      if (isPlanningRef.current) return;
+      isPlanningRef.current = true;
 
-      const { data, error } = await supabase.functions.invoke('allow-snack-assignment', {
-        body: {
-          day_key: new Date().toISOString().slice(0, 10),
-          candidate_exercise_ids: exercises.map((exercise) => exercise.id),
-          swap: false,
-        },
-      });
+      const dayKey = new Date().toISOString().slice(0, 10);
 
-      if (error || !data) {
-        setAssignedExerciseId(exercises[0].id);
-        return;
-      }
+      try {
+        if (!userId) {
+          // Unauthenticated preview: synthesise a single pending slot.
+          setTodaySlots([{
+            id: 'preview',
+            status: 'notified',
+            exercise_id: exercises[0].id,
+            scheduled_at: null,
+            scheduled_at_local: null,
+            source: 'auto',
+          }]);
+          setActiveSlotId('preview');
+          setSwapsRemaining(1);
+          return;
+        }
 
-      if (typeof data.assigned_exercise_id === 'string') {
-        setAssignedExerciseId(data.assigned_exercise_id);
-      } else {
-        setAssignedExerciseId(exercises[0].id);
-      }
+        const { data, error } = await supabase.functions.invoke('allow-snack-assignment', {
+          body: {
+            action: 'plan',
+            day_key: dayKey,
+            candidate_exercise_ids: exercises.map((e) => e.id),
+          },
+        });
 
-      if (typeof data.assignment_limit === 'number') {
-        setFreeLimit(data.assignment_limit);
-      }
-      if (typeof data.remaining_assignments === 'number') {
-        setFreeRemaining(data.remaining_assignments);
-      } else if (data.remaining_assignments === null) {
-        setFreeRemaining(null);
-      }
+        if (error || !data) return;
 
-      if (typeof data.remaining_swaps === 'number') {
-        setManualSwapsRemaining(data.remaining_swaps);
-      } else if (data.remaining_swaps === null) {
-        setManualSwapsRemaining(null);
+        const slots = (data.slots ?? []) as DaySlot[];
+        setTodaySlots(slots);
+
+        const active = data.active_slot as { id: string } | null;
+        setActiveSlotId(active?.id ?? null);
+
+        if (typeof data.slot_limit === 'number') setSlotLimit(data.slot_limit);
+        else if (data.slot_limit === null) setSlotLimit(null);
+
+        if (typeof data.remaining_swaps === 'number') setSwapsRemaining(data.remaining_swaps);
+        else if (data.remaining_swaps === null) setSwapsRemaining(null);
+      } finally {
+        isPlanningRef.current = false;
       }
     };
 
-    void assignSnack();
-  }, [exercises, userId]);
+    void loadDayPlan();
+  }, [exercises, userId, planTrigger]);
 
   const ensureSession = async (attempts = 2, delayMs = 300) => {
     for (let i = 0; i < attempts; i += 1) {
@@ -403,23 +409,81 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
     return false;
   };
 
-  const assignedExercise = exercises.find((exercise) => exercise.id === assignedExerciseId) ?? exercises[0] ?? null;
+  // Re-fetch the plan whenever the user returns to the tab so that any
+  // config changes made in the DB are reflected without a full page reload.
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        setPlanTrigger((n) => n + 1);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
+  const handleDevReset = async () => {
+    if (!userId) return;
+    const dayKey = new Date().toISOString().slice(0, 10);
+    await supabase
+      .from('daily_snack_assignments')
+      .delete()
+      .eq('user_id', userId)
+      .eq('day_key', dayKey);
+    setTodaySlots([]);
+    setActiveSlotId(null);
+    setSlotLimit(null);
+    setSwapsRemaining(1);
+    setPlanTrigger((n) => n + 1);
+  };
+
+  // Sync completion back from App when user finishes an exercise.
+  useEffect(() => {
+    if (!completedSlotId) return;
+    setTodaySlots((prev) =>
+      prev.map((s) => s.id === completedSlotId ? { ...s, status: 'completed' } : s)
+    );
+    setActiveSlotId(null);
+  }, [completedSlotId]);
+
+  // A slot is "ready" if it has arrived (scheduled_at <= now) or is already active/notified.
+  const isSlotReady = (slot: DaySlot): boolean => {
+    if (slot.status === 'notified' || slot.status === 'active') return true;
+    if (slot.status === 'pending') {
+      if (!slot.scheduled_at) return true;
+      return new Date(slot.scheduled_at).getTime() <= Date.now();
+    }
+    return false;
+  };
+
+  // Derived quota values — update automatically when todaySlots changes.
+  const slotsConsumed = todaySlots.filter((s) => s.status === 'completed').length;
+  const freeRemaining = slotLimit !== null ? Math.max(0, slotLimit - slotsConsumed) : null;
+
+  // Derive next-slot time from the earliest not-yet-ready pending slot.
+  const nextPendingSlot = todaySlots
+    .filter((s) => s.status === 'pending' && s.scheduled_at && new Date(s.scheduled_at).getTime() > Date.now())
+    .sort((a, b) => new Date(a.scheduled_at!).getTime() - new Date(b.scheduled_at!).getTime())[0] ?? null;
+  const nextSlotLocalTime = nextPendingSlot?.scheduled_at_local ?? null;
+
+  // Only surface the current slot when the quota allows and a ready slot exists.
+  const currentSlot = (freeRemaining === null || freeRemaining > 0)
+    ? (todaySlots.find((s) => s.id === activeSlotId && isSlotReady(s))
+        ?? todaySlots.find((s) => isSlotReady(s) && (s.status === 'notified' || s.status === 'active'))
+        ?? todaySlots.find((s) => isSlotReady(s) && s.status === 'pending')
+        ?? null)
+    : null;
+
+  const currentExercise = exercises.find((e) => e.id === currentSlot?.exercise_id) ?? null;
 
   const handleStartAssignedSnack = () => {
-    if (!assignedExercise) {
-      return;
-    }
-
-    // Autopilot assignment should not consume browse-style free-tier view quota.
-    onViewExercise(assignedExercise);
+    if (!currentExercise || !currentSlot) return;
+    onViewExercise(currentExercise, currentSlot.id);
   };
 
   const handleSwapAssignedSnack = () => {
-    if (exercises.length < 2 || !assignedExercise || isAssigningSnack) {
-      return;
-    }
+    if (!currentSlot || exercises.length < 2 || isAssigningSnack) return;
 
-    if (!isPremium && manualSwapsRemaining !== null && manualSwapsRemaining <= 0) {
+    if (!isPremium && swapsRemaining !== null && swapsRemaining <= 0) {
       setExerciseError('You have used your free daily swap. Upgrade for unlimited swaps.');
       return;
     }
@@ -428,9 +492,10 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
       setIsAssigningSnack(true);
       const { data, error } = await supabase.functions.invoke('allow-snack-assignment', {
         body: {
+          action: 'swap',
           day_key: new Date().toISOString().slice(0, 10),
-          candidate_exercise_ids: exercises.map((exercise) => exercise.id),
-          swap: true,
+          swap_slot_id: currentSlot.id,
+          candidate_exercise_ids: exercises.map((e) => e.id),
         },
       });
 
@@ -442,28 +507,21 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
 
       if (data.allowed === false && data.reason === 'swap_limit_reached') {
         setExerciseError('You have used your free daily swap. Upgrade for unlimited swaps.');
-        setManualSwapsRemaining(0);
+        setSwapsRemaining(0);
         setIsAssigningSnack(false);
         return;
       }
 
       if (typeof data.assigned_exercise_id === 'string') {
-        setAssignedExerciseId(data.assigned_exercise_id);
+        setTodaySlots((prev) =>
+          prev.map((s) =>
+            s.id === currentSlot.id ? { ...s, exercise_id: data.assigned_exercise_id as string } : s
+          )
+        );
       }
 
-      if (typeof data.remaining_swaps === 'number') {
-        setManualSwapsRemaining(data.remaining_swaps);
-      } else if (data.remaining_swaps === null) {
-        setManualSwapsRemaining(null);
-      }
-      if (typeof data.assignment_limit === 'number') {
-        setFreeLimit(data.assignment_limit);
-      }
-      if (typeof data.remaining_assignments === 'number') {
-        setFreeRemaining(data.remaining_assignments);
-      } else if (data.remaining_assignments === null) {
-        setFreeRemaining(null);
-      }
+      if (typeof data.remaining_swaps === 'number') setSwapsRemaining(data.remaining_swaps);
+      else if (data.remaining_swaps === null) setSwapsRemaining(null);
 
       setExerciseError('');
       setIsAssigningSnack(false);
@@ -513,8 +571,10 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
     onNavigate('space-analysis');
   };
 
-  const weeklyGoal = 14;
-  const weeklyPercent = Math.min(100, Math.round((weeklyCount / weeklyGoal) * 100));
+  const weeklyGoal = slotLimit !== null ? slotLimit * 7 : null;
+  const weeklyPercent = weeklyGoal !== null
+    ? Math.min(100, Math.round((weeklyCount / weeklyGoal) * 100))
+    : null;
 
   return (
     <div className="min-h-screen pb-24 bg-stone-50 smooth-scroll">
@@ -545,6 +605,15 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
               >
                 <Camera className="w-5 h-5 text-slate-600" />
               </button>
+              {import.meta.env.DEV && (
+                <button
+                  onClick={handleDevReset}
+                  className="touch-target px-2.5 py-1.5 text-xs font-semibold bg-rose-100 text-rose-700 hover:bg-rose-200 rounded-lg transition-smooth active:scale-95"
+                  title="DEV: reset today's snacks"
+                >
+                  Reset
+                </button>
+              )}
               <button
                 onClick={() => onNavigate('settings')}
                 className="touch-target p-2.5 sm:p-2 hover:bg-stone-100 rounded-lg transition-smooth active:scale-95"
@@ -575,8 +644,8 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
           </div>
         )}
 
-        {/* Premium Upgrade Banner */}
-        {!isPremium && (
+        {/* Premium Upgrade Banner — only shown when limit is close or reached */}
+        {!isPremium && freeRemaining !== null && freeRemaining <= 1 && (
           <div className="mb-6 sm:mb-8 animate-scale-in">
             <div className="bg-gradient-to-r from-orange-500 to-orange-600 rounded-2xl sm:rounded-3xl p-5 sm:p-6 shadow-xl border-2 border-orange-400 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-8 translate-x-8"></div>
@@ -588,15 +657,13 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
                     <h3 className="text-xl sm:text-2xl font-bold text-white">Upgrade to Premium</h3>
                   </div>
                   <p className="text-white/95 text-sm sm:text-base mb-3">
-                    {freeRemaining === null
-                      ? `Autopilot quotas reset daily. Get unlimited access with Premium.`
-                      : freeRemaining > 0
-                        ? `${freeRemaining} of ${freeLimit} free auto-snack assignments remaining today.`
-                        : `You've reached your free auto-snack assignment limit for today.`
+                    {freeRemaining === 0
+                      ? `You've had all your snacks for today. Come back tomorrow — or upgrade for unlimited.`
+                      : `1 snack slot left today. Upgrade for unlimited snacks and calendar scheduling.`
                     }
                   </p>
                   <ul className="space-y-1.5">
-                    {['Unlimited exercises', 'Space analysis', 'Custom plans', 'Progress tracking'].map((feature, idx) => (
+                    {['Unlimited snacks', 'Calendar-aware scheduling', 'Space analysis', 'Custom plans'].map((feature, idx) => (
                       <li key={idx} className="flex items-center gap-2 text-white/95 text-xs sm:text-sm">
                         <Sparkles className="w-4 h-4 flex-shrink-0" />
                         {feature}
@@ -636,8 +703,8 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
           <StatCard
             icon={<Award className="w-5 h-5" />}
             label="Weekly Goal"
-              value={`${weeklyPercent}%`}
-              subValue={`${weeklyCount} of ${weeklyGoal} snacks`}
+              value={weeklyPercent !== null ? `${weeklyPercent}%` : `${weeklyCount}`}
+              subValue={weeklyGoal !== null ? `${weeklyCount} of ${weeklyGoal} snacks` : 'snacks this week'}
             color="bg-orange-500"
             delay="0.2s"
           />
@@ -648,7 +715,7 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
           <button
             onClick={handleStartAssignedSnack}
             className="touch-target group relative overflow-hidden bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 active:scale-95 text-white rounded-2xl p-5 sm:p-6 transition-smooth hover:scale-[1.02] hover:-translate-y-1 shadow-lg hover:shadow-xl text-left"
-            disabled={!assignedExercise}
+            disabled={!currentExercise}
           >
             <div className="relative flex items-center justify-between">
               <div>
@@ -718,63 +785,128 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
           ))}
         </div>
 
-        {/* Scheduled Exercises */}
+        {/* Today's Snack Plan */}
         <div className="space-y-4">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold text-slate-900">
-              Today&apos;s Auto-Assigned Snack
-            </h2>
-            <span className="text-sm text-slate-500 font-medium">
-              {assignedExercise ? 'Autopilot active' : 'No snack available'}
-            </span>
-          </div>
-
-          <div className="space-y-3">
-            {isLoadingExercises && (
-              <div className="text-sm text-slate-500">Loading exercises...</div>
-            )}
-            {!isLoadingExercises && exerciseError && (
-              <div className="text-sm text-red-600">{exerciseError}</div>
-            )}
-            {!isLoadingExercises && !exerciseError && assignedExercise && (
-              <ExerciseCard
-                exercise={assignedExercise}
-                onClick={handleStartAssignedSnack}
-                index={0}
-                isAutopilot
-              />
-            )}
-            {!isLoadingExercises && !exerciseError && assignedExercise && exercises.length > 1 && (
-              <div className="flex items-center justify-between rounded-xl border border-stone-200 bg-white px-4 py-3">
-                <p className="text-sm text-slate-600">
-                  Want a different snack?
-                </p>
-                <button
-                  type="button"
-                  onClick={handleSwapAssignedSnack}
-                  disabled={isAssigningSnack}
-                  className="rounded-lg bg-stone-900 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800"
-                >
-                  {isAssigningSnack ? 'Swapping...' : `Swap Snack ${!isPremium && manualSwapsRemaining !== null ? `(${manualSwapsRemaining} left)` : ''}`}
-                </button>
-              </div>
-            )}
-            {!isLoadingExercises && !exerciseError && !assignedExercise && (
-              <div className="text-sm text-slate-500">No matching snacks found. Update preferences to broaden options.</div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-2xl font-bold text-slate-900">Today&apos;s Snacks</h2>
+            {slotLimit !== null && (
+              <span className="text-sm text-slate-500 font-medium">
+                {slotsConsumed} of {slotLimit} done
+              </span>
             )}
           </div>
+
+          {isLoadingExercises && (
+            <div className="text-sm text-slate-500">Loading your snack plan...</div>
+          )}
+          {!isLoadingExercises && exerciseError && (
+            <div className="text-sm text-red-600">{exerciseError}</div>
+          )}
+
+          {!isLoadingExercises && !exerciseError && (
+            <div className="space-y-3">
+              {/* Current / active snack */}
+              {currentExercise && currentSlot && (
+                <>
+                  <ExerciseCard
+                    exercise={currentExercise}
+                    onClick={handleStartAssignedSnack}
+                    index={0}
+                    isAutopilot
+                  />
+                  {exercises.length > 1 && (
+                    <div className="flex items-center justify-between rounded-xl border border-stone-200 bg-white px-4 py-3">
+                      <p className="text-sm text-slate-600">Not feeling this one?</p>
+                      <button
+                        type="button"
+                        onClick={handleSwapAssignedSnack}
+                        disabled={isAssigningSnack}
+                        className="rounded-lg bg-stone-900 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800 disabled:opacity-50"
+                      >
+                        {isAssigningSnack
+                          ? 'Swapping...'
+                          : `Swap${!isPremium && swapsRemaining !== null ? ` (${swapsRemaining} left)` : ''}`}
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Completed slots */}
+              {todaySlots.filter((s) => s.status === 'completed').map((slot) => {
+                const ex = exercises.find((e) => e.id === slot.exercise_id);
+                return (
+                  <div
+                    key={slot.id}
+                    className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm"
+                  >
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                    <span className="flex-1 font-medium text-emerald-900 line-through decoration-emerald-400">
+                      {ex?.title ?? 'Snack'}
+                    </span>
+                    {slot.scheduled_at_local && (
+                      <span className="text-xs text-emerald-600">{slot.scheduled_at_local}</span>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Upcoming slots — pending but not yet due */}
+              {todaySlots.filter((s) => s.status === 'pending' && s.id !== currentSlot?.id && !isSlotReady(s)).length > 0 && (
+                <div className="mt-2 space-y-2">
+                  {todaySlots
+                    .filter((s) => s.status === 'pending' && s.id !== currentSlot?.id && !isSlotReady(s))
+                    .map((slot) => (
+                      <div
+                        key={slot.id}
+                        className="flex items-center gap-3 rounded-xl border border-stone-100 bg-white px-4 py-3 text-sm text-slate-600"
+                      >
+                        <Clock className="w-4 h-4 text-orange-400 flex-shrink-0" />
+                        <span>
+                          Next snack at{' '}
+                          <span className="font-semibold text-slate-900">
+                            {slot.scheduled_at_local ?? '—'}
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              )}
+
+              {/* No snacks available */}
+              {!currentExercise && todaySlots.length === 0 && (
+                <div className="text-sm text-slate-500">
+                  No matching snacks found. Update your preferences to broaden options.
+                </div>
+              )}
+
+              {/* All done for today */}
+              {!currentExercise && todaySlots.length > 0 && todaySlots.every((s) => s.status === 'completed' || s.status === 'skipped') && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-center">
+                  <p className="text-sm font-semibold text-emerald-800">All done for today! 🎉</p>
+                  <p className="text-xs text-emerald-700 mt-1">Your snacks reset tomorrow.</p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Empty State Message */}
-        <div className="mt-8 bg-white rounded-2xl p-8 text-center border border-stone-200 shadow-sm">
-          <Calendar className="w-12 h-12 text-slate-400 mx-auto mb-3" />
-          <h3 className="text-lg font-semibold text-slate-900 mb-2">
-            AI Scheduling Coming Soon
-          </h3>
-          <p className="text-slate-600 text-sm">
-            Connect your calendar to automatically schedule kinetic snacks in your free time
-          </p>
-        </div>
+        {/* Next snack time indicator */}
+        {nextSlotLocalTime && !currentExercise && (
+          <div className="mt-6 bg-white rounded-2xl p-5 border border-stone-200 shadow-sm flex items-center gap-3">
+            <div className="bg-orange-100 p-2.5 rounded-xl">
+              <Calendar className="w-5 h-5 text-orange-600" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-slate-900">
+                Your next snack is at {nextSlotLocalTime}
+              </p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                We&apos;ll remind you when it&apos;s time to move.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
