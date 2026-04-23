@@ -71,44 +71,63 @@ vi.mock('../../lib/supabase', () => ({
       refreshSession: vi.fn().mockResolvedValue({ data: { session: { access_token: 'token' } }, error: null }),
     },
     functions: {
-      invoke: vi.fn(async (fnName: string, payload?: { body?: { swap?: boolean } }) => {
+      invoke: vi.fn(async (fnName: string, payload?: { body?: { action?: string } }) => {
         if (fnName !== 'allow-snack-assignment') {
           return { data: null, error: null };
         }
 
-        const isSwap = payload?.body?.swap === true;
-        if (!isSwap) {
+        const action = payload?.body?.action ?? 'plan';
+
+        if (action === 'plan') {
           return {
             data: {
-              allowed: true,
-              assigned_exercise_id: 'approved-1',
+              slots: [{
+                id: 'slot-1',
+                status: 'notified',
+                exercise_id: 'approved-1',
+                scheduled_at: new Date().toISOString(),
+                scheduled_at_local: '9:00 AM',
+                source: 'auto',
+              }],
+              active_slot: { id: 'slot-1', exercise_id: 'approved-1', scheduled_at: new Date().toISOString() },
+              next_slot: null,
+              slot_limit: null,
+              slots_planned: 1,
+              slots_consumed: 0,
+              remaining_slots: null,
+              swap_limit: null,
               remaining_swaps: null,
             },
             error: null,
           };
         }
 
-        if (!mockedState.swapUsed) {
-          mockedState.swapUsed = true;
+        if (action === 'swap') {
+          if (!mockedState.swapUsed) {
+            mockedState.swapUsed = true;
+            return {
+              data: {
+                allowed: true,
+                slot_id: 'slot-1',
+                assigned_exercise_id: mockedState.generatedExercise.id,
+                swap_limit: null,
+                remaining_swaps: null,
+              },
+              error: null,
+            };
+          }
           return {
             data: {
-              allowed: true,
-              assigned_exercise_id: mockedState.generatedExercise.id,
+              allowed: false,
+              reason: 'no_alternative_candidates',
+              swap_limit: null,
               remaining_swaps: null,
             },
             error: null,
           };
         }
 
-        return {
-          data: {
-            allowed: false,
-            reason: 'no_alternative_candidates',
-            assigned_exercise_id: mockedState.generatedExercise.id,
-            remaining_swaps: null,
-          },
-          error: null,
-        };
+        return { data: null, error: null };
       }),
     },
   },
@@ -179,7 +198,7 @@ describe('Dashboard recommendations', () => {
     expect(screen.queryByText('Pending Review Exercise')).not.toBeInTheDocument();
     expect(await screen.findByRole('button', { name: /Approved Mobility/i })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Swap Snack/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Swap/i }));
     expect(await screen.findByRole('button', { name: /Generated Office Reset/i })).toBeInTheDocument();
     expect(screen.getByText('Matches your 5-minute target')).toBeInTheDocument();
     expect(screen.getByText('Low-sweat and work-friendly')).toBeInTheDocument();

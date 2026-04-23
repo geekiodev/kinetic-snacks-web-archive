@@ -97,6 +97,8 @@ export interface Exercise {
 function App() {
   const [currentView, setCurrentView] = useState<View>('landing');
   const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null);
+  const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
+  const [completedSlotId, setCompletedSlotId] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [subscriptionPlan, setSubscriptionPlan] = useState<SubscriptionPlan>('free');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -125,7 +127,7 @@ function App() {
     const [{ data, error }, { data: notificationData, error: notificationError }] = await Promise.all([
       supabase
         .from('profiles')
-        .select('preferences')
+        .select('preferences, subscription_plan')
         .eq('id', userId)
         .maybeSingle(),
       supabase
@@ -148,6 +150,30 @@ function App() {
     if (notificationError && notificationError.code !== 'PGRST116') {
       setProfileLoadError(notificationError.message);
       return false;
+    }
+
+    // Fetch authoritative subscription status from the edge function,
+    // which checks the subscriptions table first (not just profiles.subscription_plan).
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (token) {
+        const statusRes = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/get-subscription-status`,
+          { method: 'GET', headers: { Authorization: `Bearer ${token}` } },
+        );
+        if (statusRes.ok) {
+          const { plan: planName } = await statusRes.json() as { plan: string };
+          setSubscriptionPlan(planName === 'premium' ? 'premium' : 'free');
+        } else {
+          // Fallback to profile field if function is unreachable.
+          const plan = (data as { subscription_plan?: string } | null)?.subscription_plan;
+          setSubscriptionPlan(plan === 'premium' ? 'premium' : 'free');
+        }
+      }
+    } catch {
+      const plan = (data as { subscription_plan?: string } | null)?.subscription_plan;
+      setSubscriptionPlan(plan === 'premium' ? 'premium' : 'free');
     }
 
     const preferences = data?.preferences as UserPreferences | null;
@@ -320,24 +346,21 @@ function App() {
     };
     setUserPreferences(normalizedPreferences);
     if (user) {
-      await supabase
-        .from('profiles')
-        .update({
-          preferences: normalizedPreferences,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', user.id);
-
-      await supabase
-        .from('notification_preferences')
-        .upsert({
-          user_id: user.id,
-          ...mapNotificationSettingsToRow(
-            normalizeNotificationSettings(normalizedPreferences.notificationSettings),
-            Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-          ),
-          updated_at: new Date().toISOString(),
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (token) {
+        await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/complete-onboarding`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            preferences: normalizedPreferences,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+          }),
         });
+      }
     }
     setCurrentView('pricing');
   };
@@ -362,15 +385,30 @@ function App() {
       throw new Error('Please sign in to save your progress.');
     }
 
-    const { error } = await supabase.from('exercise_completions').insert({
-      user_id: user.id,
-      exercise_id: exercise.id,
-      duration_minutes: exercise.duration,
-      completed_at: new Date().toISOString(),
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    if (!token) throw new Error('Session expired. Please sign in again.');
+
+    const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/complete-exercise`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        exercise_id: exercise.id,
+        slot_id: selectedSlotId ?? undefined,
+        duration_minutes: exercise.duration,
+      }),
     });
 
-    if (error) {
-      throw new Error(error.message);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error((err as { error?: string }).error ?? 'Failed to record completion.');
+    }
+
+    if (selectedSlotId) {
+      setCompletedSlotId(selectedSlotId);
     }
   };
 
@@ -425,12 +463,16 @@ function App() {
 
       {currentView === 'dashboard' && (
         <Dashboard
-          onViewExercise={(exercise) => handleViewChange('exercise', exercise)}
+          onViewExercise={(exercise, slotId) => {
+            setSelectedSlotId(slotId ?? null);
+            handleViewChange('exercise', exercise);
+          }}
           onNavigate={handleViewChange}
           userId={user?.id || null}
           userPreferences={userPreferences}
           subscriptionPlan={subscriptionPlan}
           onUpgrade={handleUpgradeToPremium}
+          completedSlotId={completedSlotId}
         />
       )}
 
@@ -454,41 +496,42 @@ function App() {
           }
 
           const normalizedNotificationSettings = normalizeNotificationSettings(prefs.notificationSettings);
-          const { error } = await supabase.from('profiles').update({
-            preferences: {
-              ...prefs,
-              notificationSettings: normalizedNotificationSettings,
-            },
-            updated_at: new Date().toISOString(),
-          }).eq('id', user.id);
+          const normalizedPrefs = { ...prefs, notificationSettings: normalizedNotificationSettings };
 
-          if (!error) {
-            const { error: notificationError } = await supabase
-              .from('notification_preferences')
-              .upsert({
-                user_id: user.id,
-                ...mapNotificationSettingsToRow(
-                  normalizedNotificationSettings,
-                  Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-                ),
-                updated_at: new Date().toISOString(),
-              });
-
-            if (notificationError) {
-              setProfileLoadError(notificationError.message);
-              return;
-            }
-          }
-
-          if (error) {
-            setProfileLoadError(error.message);
+          const { data: sessionData } = await supabase.auth.getSession();
+          const token = sessionData?.session?.access_token;
+          if (!token) {
+            setProfileLoadError('Session expired. Please sign in again.');
             return;
           }
 
-          setUserPreferences({
-            ...prefs,
-            notificationSettings: normalizedNotificationSettings,
+          const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-user-preferences`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              preferences: normalizedPrefs,
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+              notificationPreferences: {
+                pushEnabled:             normalizedNotificationSettings.pushEnabled,
+                quietHoursEnabled:       normalizedNotificationSettings.quietHoursEnabled,
+                quietStartLocal:         normalizedNotificationSettings.quietStartLocal,
+                quietEndLocal:           normalizedNotificationSettings.quietEndLocal,
+                reminderWindow:          normalizedNotificationSettings.reminderWindow,
+                maxDailyNotifications:   normalizedNotificationSettings.maxDailyNotifications,
+              },
+            }),
           });
+
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: 'Failed to save preferences.' }));
+            setProfileLoadError((err as { error?: string }).error ?? 'Failed to save preferences.');
+            return;
+          }
+
+          setUserPreferences(normalizedPrefs);
           setCurrentView('dashboard');
         }}
         onSignOut={handleSignOut}
@@ -501,6 +544,12 @@ function App() {
           onBack={() => setCurrentView('dashboard')}
           isPremium={subscriptionPlan === 'premium'}
           onUpgrade={handleUpgradeToPremium}
+          userId={user?.id ?? null}
+          userPreferences={userPreferences}
+          onStartExercise={(exercise) => {
+            setSelectedSlotId(null);
+            handleViewChange('exercise', exercise);
+          }}
         />
       )}
 

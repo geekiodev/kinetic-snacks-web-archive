@@ -16,6 +16,7 @@ export type LimitationRuleMap = Record<string, string[]>;
 let cachedRules: LimitationRuleMap | null = null;
 let cachedAt: number | null = null;
 const RULE_CACHE_MS = 5 * 60 * 1000;
+const DURATION_TOLERANCE_MINUTES = 2;
 
 export const loadLimitationRules = async (): Promise<LimitationRuleMap> => {
   if (cachedRules && cachedAt && Date.now() - cachedAt < RULE_CACHE_MS) {
@@ -57,6 +58,18 @@ const isEquipmentCompatible = (exerciseEquipment: string[], availableEquipment: 
   if (prefersNoEquipment(exerciseEquipment)) return true;
 
   return exerciseEquipment.every((item) => available.has(normalize(item)));
+};
+
+export const isSafeForLimitations = (
+  candidate: Exercise,
+  limitations: string[],
+  limitationRules: LimitationRuleMap,
+): boolean => {
+  const activeLimitations = limitations.filter((l) => normalize(l) !== 'none');
+  if (activeLimitations.length === 0) return true;
+  if (violatesContraindications(candidate, activeLimitations)) return false;
+  if (violatesKeywordRules(candidate, activeLimitations, limitationRules)) return false;
+  return true;
 };
 
 const violatesContraindications = (candidate: Exercise, limitations: string[]) => {
@@ -118,7 +131,7 @@ export const validateExerciseCandidate = (
     return { valid: false, reason: 'Intensity mismatch' };
   }
 
-  if (Number.isFinite(preferences.duration) && candidate.duration > preferences.duration + 2) {
+  if (Number.isFinite(preferences.duration) && candidate.duration > preferences.duration + DURATION_TOLERANCE_MINUTES) {
     return { valid: false, reason: 'Duration too long' };
   }
 

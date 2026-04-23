@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Clock,
   Calendar,
+  CheckCircle2,
   Settings,
   Camera,
   Zap,
@@ -9,27 +10,40 @@ import {
   Award,
   Crown,
   Lock,
-  Sparkles
+  Sparkles,
+  FastForward,
+  X,
+  Shuffle,
 } from 'lucide-react';
 import { Exercise, UserPreferences, View, SubscriptionPlan } from '../App';
 import { supabase } from '../lib/supabase';
-import { loadLimitationRules, validateExerciseCandidate } from '../lib/exerciseValidation';
+import { loadLimitationRules, validateExerciseCandidate, isSafeForLimitations } from '../lib/exerciseValidation';
 import { generateExercises, rankExercises } from '../lib/exerciseGenerator';
 
 interface DashboardProps {
-  onViewExercise: (exercise: Exercise) => void;
+  onViewExercise: (exercise: Exercise, slotId?: string) => void;
   onNavigate: (view: View) => void;
   userId: string | null;
   userPreferences: UserPreferences;
   subscriptionPlan: SubscriptionPlan;
   onUpgrade: () => void;
+  completedSlotId?: string | null;
 }
 
-export default function Dashboard({ onViewExercise, onNavigate, userId, userPreferences, subscriptionPlan, onUpgrade }: DashboardProps) {
-  const [selectedDate, setSelectedDate] = useState('today');
+const HISTORY_LOOKBACK_DAYS = 30;
+const MIN_EXERCISE_COUNT = 3;
+
+type DaySlot = {
+  id: string;
+  status: string;
+  exercise_id: string;
+  scheduled_at: string | null;
+  scheduled_at_local: string | null;
+  source: string;
+};
+
+export default function Dashboard({ onViewExercise, onNavigate, userId, userPreferences, subscriptionPlan, onUpgrade, completedSlotId }: DashboardProps) {
   const [greeting, setGreeting] = useState('');
-  const [freeRemaining, setFreeRemaining] = useState<number | null>(null);
-  const [freeLimit, setFreeLimit] = useState(3);
   const [currentStreak, setCurrentStreak] = useState(0);
   const [todayCount, setTodayCount] = useState(0);
   const [weeklyCount, setWeeklyCount] = useState(0);
@@ -40,9 +54,20 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
   const [isLoadingExercises, setIsLoadingExercises] = useState(false);
   const [exerciseError, setExerciseError] = useState('');
   const [nudgeStatus, setNudgeStatus] = useState<string | null>(null);
-  const [assignedExerciseId, setAssignedExerciseId] = useState<string | null>(null);
-  const [manualSwapsRemaining, setManualSwapsRemaining] = useState<number | null>(1);
+  const [todaySlots, setTodaySlots] = useState<DaySlot[]>([]);
+  const [activeSlotId, setActiveSlotId] = useState<string | null>(null);
+  const [slotLimit, setSlotLimit] = useState<number | null>(null);
+  const [swapsRemaining, setSwapsRemaining] = useState<number | null>(1);
   const [isAssigningSnack, setIsAssigningSnack] = useState(false);
+  const [planTrigger, setPlanTrigger] = useState(0);
+
+  const isPlanningRef = useRef(false);
+  const isDevResetRef = useRef(false);
+  const [snoozingSlotId, setSnoozingSlotId] = useState<string | null>(null);
+  // Full limitation-safe exercise pool for Surprise Me — not filtered by
+  // intensity/duration/equipment so the surprise can reach outside normal preferences.
+  const surprisePoolRef = useRef<Exercise[]>([]);
+  const lastSurprisedIdRef = useRef<string | null>(null);
 
   const isPremium = subscriptionPlan === 'premium';
 
@@ -71,7 +96,7 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
         .from('exercise_completions')
         .select('exercise_id, completed_at, duration_minutes')
         .eq('user_id', userId)
-        .gte('completed_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+        .gte('completed_at', new Date(Date.now() - HISTORY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString());
 
       if (error || !data) {
         setCurrentStreak(0);
@@ -83,14 +108,12 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
         return;
       }
 
-      const toDateKey = (value: string) => {
-        const date = new Date(value);
-        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-      };
+      const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const toDateKey = (value: string) =>
+        new Date(value).toLocaleDateString('sv-SE', { timeZone: localTz });
 
-      const todayKey = toDateKey(new Date().toISOString());
+      const todayKey = new Date().toLocaleDateString('sv-SE', { timeZone: localTz });
       const weekStart = new Date();
-      weekStart.setHours(0, 0, 0, 0);
       weekStart.setDate(weekStart.getDate() - 6);
       const weekStartKey = toDateKey(weekStart.toISOString());
 
@@ -235,6 +258,13 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
           })) as Exercise[];
 
         const limitationRules = await loadLimitationRules();
+
+        // Surprise Me pool: limitations-only filter, no intensity/duration/equipment gate.
+        // This gives genuine variety — the surprise can step outside normal preferences safely.
+        surprisePoolRef.current = mapped.filter((ex) =>
+          isSafeForLimitations(ex, userPreferences.limitations, limitationRules),
+        );
+
         const filtered = mapped.filter((exercise) =>
           validateExerciseCandidate(exercise, userPreferences, limitationRules).valid
         );
@@ -259,11 +289,10 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
           },
         });
 
-        const minCount = 3;
-        if (ranked.length < minCount) {
+        if (ranked.length < MIN_EXERCISE_COUNT) {
           const generated = await generateExercises({
             preferences: userPreferences,
-            count: minCount - ranked.length,
+            count: MIN_EXERCISE_COUNT - ranked.length,
             history: {
               recentExerciseIds,
               recentVariationKeys,
@@ -273,21 +302,6 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
           const validatedGenerated = generated.filter((exercise) =>
             validateExerciseCandidate(exercise, userPreferences, limitationRules).valid
           );
-          const persistGenerated = false;
-          if (persistGenerated && validatedGenerated.length > 0) {
-            void supabase.from('exercises').insert(
-              validatedGenerated.map((exercise) => ({
-                title: exercise.title,
-                duration_minutes: exercise.duration,
-                intensity: exercise.intensity,
-                equipment: exercise.equipment,
-                instructions: exercise.instructions,
-                tips: exercise.tips,
-                category: exercise.category,
-                is_active: false,
-              }))
-            );
-          }
           setExercises(
             rankExercises({
               preferences: userPreferences,
@@ -316,56 +330,67 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
   }, [hasLoadedStats, userPreferences, recentCompletions]);
 
   useEffect(() => {
-    const assignSnack = async () => {
-      if (exercises.length === 0) {
-        setAssignedExerciseId(null);
-        return;
-      }
+    const loadDayPlan = async () => {
+      if (exercises.length === 0) return;
 
-      if (!userId) {
-        setAssignedExerciseId(exercises[0].id);
-        setManualSwapsRemaining(1);
-        setFreeRemaining(null);
-        return;
-      }
+      // In-flight guard: prevent concurrent calls (e.g. from rapid exercises
+      // state updates), but allow re-runs once the current call completes so
+      // that config changes in the DB are always picked up.
+      if (isPlanningRef.current) return;
+      isPlanningRef.current = true;
 
-      const { data, error } = await supabase.functions.invoke('allow-snack-assignment', {
-        body: {
-          day_key: new Date().toISOString().slice(0, 10),
-          candidate_exercise_ids: exercises.map((exercise) => exercise.id),
-          swap: false,
-        },
-      });
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const dayKey = new Date().toLocaleDateString('sv-SE', { timeZone: timezone });
 
-      if (error || !data) {
-        setAssignedExerciseId(exercises[0].id);
-        return;
-      }
+      try {
+        if (!userId) {
+          // Unauthenticated preview: synthesise a single pending slot.
+          setTodaySlots([{
+            id: 'preview',
+            status: 'notified',
+            exercise_id: exercises[0].id,
+            scheduled_at: null,
+            scheduled_at_local: null,
+            source: 'auto',
+          }]);
+          setActiveSlotId('preview');
+          setSwapsRemaining(1);
+          return;
+        }
 
-      if (typeof data.assigned_exercise_id === 'string') {
-        setAssignedExerciseId(data.assigned_exercise_id);
-      } else {
-        setAssignedExerciseId(exercises[0].id);
-      }
+        const devMode = isDevResetRef.current;
+        isDevResetRef.current = false;
 
-      if (typeof data.assignment_limit === 'number') {
-        setFreeLimit(data.assignment_limit);
-      }
-      if (typeof data.remaining_assignments === 'number') {
-        setFreeRemaining(data.remaining_assignments);
-      } else if (data.remaining_assignments === null) {
-        setFreeRemaining(null);
-      }
+        const { data, error } = await supabase.functions.invoke('allow-snack-assignment', {
+          body: {
+            action: 'plan',
+            day_key: dayKey,
+            timezone,
+            candidate_exercise_ids: exercises.map((e) => e.id),
+            ...(devMode && { dev_mode: true }),
+          },
+        });
 
-      if (typeof data.remaining_swaps === 'number') {
-        setManualSwapsRemaining(data.remaining_swaps);
-      } else if (data.remaining_swaps === null) {
-        setManualSwapsRemaining(null);
+        if (error || !data) return;
+
+        const slots = (data.slots ?? []) as DaySlot[];
+        setTodaySlots(slots);
+
+        const active = data.active_slot as { id: string } | null;
+        setActiveSlotId(active?.id ?? null);
+
+        if (typeof data.slot_limit === 'number') setSlotLimit(data.slot_limit);
+        else if (data.slot_limit === null) setSlotLimit(null);
+
+        if (typeof data.remaining_swaps === 'number') setSwapsRemaining(data.remaining_swaps);
+        else if (data.remaining_swaps === null) setSwapsRemaining(null);
+      } finally {
+        isPlanningRef.current = false;
       }
     };
 
-    void assignSnack();
-  }, [exercises, userId]);
+    void loadDayPlan();
+  }, [exercises, userId, planTrigger, subscriptionPlan]);
 
   const ensureSession = async (attempts = 2, delayMs = 300) => {
     for (let i = 0; i < attempts; i += 1) {
@@ -403,34 +428,102 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
     return false;
   };
 
-  const assignedExercise = exercises.find((exercise) => exercise.id === assignedExerciseId) ?? exercises[0] ?? null;
+  // Re-fetch the plan whenever the user returns to the tab so that any
+  // config changes made in the DB are reflected without a full page reload.
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        setPlanTrigger((n) => n + 1);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
+  const handleDevReset = async () => {
+    if (!userId) return;
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const dayKey = new Date().toLocaleDateString('sv-SE', { timeZone: timezone });
+    await supabase
+      .from('daily_snack_assignments')
+      .delete()
+      .eq('user_id', userId)
+      .eq('day_key', dayKey);
+    setTodaySlots([]);
+    setActiveSlotId(null);
+    setSlotLimit(null);
+    setSwapsRemaining(1);
+    isDevResetRef.current = true;
+    setPlanTrigger((n) => n + 1);
+  };
+
+  // Sync completion back from App when user finishes an exercise.
+  // For premium users (unlimited slots), also trigger a re-plan so the next
+  // slot is scheduled immediately rather than waiting for a page reload.
+  useEffect(() => {
+    if (!completedSlotId) return;
+    setTodaySlots((prev) =>
+      prev.map((s) => s.id === completedSlotId ? { ...s, status: 'completed' } : s)
+    );
+    setActiveSlotId(null);
+    if (subscriptionPlan === 'premium') {
+      setPlanTrigger((n) => n + 1);
+    }
+  }, [completedSlotId]);
+
+  // A slot is "ready" if it has arrived (scheduled_at <= now) or is already active/notified.
+  const isSlotReady = (slot: DaySlot): boolean => {
+    if (slot.status === 'notified' || slot.status === 'active') return true;
+    if (slot.status === 'pending') {
+      if (!slot.scheduled_at) return true;
+      return new Date(slot.scheduled_at).getTime() <= Date.now();
+    }
+    return false;
+  };
+
+  // Derived quota values — update automatically when todaySlots changes.
+  const slotsConsumed = todaySlots.filter((s) => s.status === 'completed').length;
+  const freeRemaining = slotLimit !== null ? Math.max(0, slotLimit - slotsConsumed) : null;
+
+  // Derive next-slot time from the earliest not-yet-ready pending slot.
+  const nextPendingSlot = todaySlots
+    .filter((s) => s.status === 'pending' && s.scheduled_at && new Date(s.scheduled_at).getTime() > Date.now())
+    .sort((a, b) => new Date(a.scheduled_at!).getTime() - new Date(b.scheduled_at!).getTime())[0] ?? null;
+  const nextSlotLocalTime = nextPendingSlot?.scheduled_at_local ?? null;
+
+  // Only surface the current slot when the quota allows and a ready slot exists.
+  const currentSlot = (freeRemaining === null || freeRemaining > 0)
+    ? (todaySlots.find((s) => s.id === activeSlotId && isSlotReady(s))
+        ?? todaySlots.find((s) => isSlotReady(s) && (s.status === 'notified' || s.status === 'active'))
+        ?? todaySlots.find((s) => isSlotReady(s) && s.status === 'pending')
+        ?? null)
+    : null;
+
+  const currentExercise = exercises.find((e) => e.id === currentSlot?.exercise_id) ?? null;
 
   const handleStartAssignedSnack = () => {
-    if (!assignedExercise) {
-      return;
-    }
-
-    // Autopilot assignment should not consume browse-style free-tier view quota.
-    onViewExercise(assignedExercise);
+    if (!currentExercise || !currentSlot) return;
+    onViewExercise(currentExercise, currentSlot.id);
   };
 
   const handleSwapAssignedSnack = () => {
-    if (exercises.length < 2 || !assignedExercise || isAssigningSnack) {
-      return;
-    }
+    if (!currentSlot || exercises.length < 2 || isAssigningSnack) return;
 
-    if (!isPremium && manualSwapsRemaining !== null && manualSwapsRemaining <= 0) {
+    if (!isPremium && swapsRemaining !== null && swapsRemaining <= 0) {
       setExerciseError('You have used your free daily swap. Upgrade for unlimited swaps.');
       return;
     }
 
     const requestSwap = async () => {
       setIsAssigningSnack(true);
+      const swapTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       const { data, error } = await supabase.functions.invoke('allow-snack-assignment', {
         body: {
-          day_key: new Date().toISOString().slice(0, 10),
-          candidate_exercise_ids: exercises.map((exercise) => exercise.id),
-          swap: true,
+          action: 'swap',
+          day_key: new Date().toLocaleDateString('sv-SE', { timeZone: swapTimezone }),
+          timezone: swapTimezone,
+          swap_slot_id: currentSlot.id,
+          candidate_exercise_ids: exercises.map((e) => e.id),
         },
       });
 
@@ -442,34 +535,104 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
 
       if (data.allowed === false && data.reason === 'swap_limit_reached') {
         setExerciseError('You have used your free daily swap. Upgrade for unlimited swaps.');
-        setManualSwapsRemaining(0);
+        setSwapsRemaining(0);
         setIsAssigningSnack(false);
         return;
       }
 
       if (typeof data.assigned_exercise_id === 'string') {
-        setAssignedExerciseId(data.assigned_exercise_id);
+        setTodaySlots((prev) =>
+          prev.map((s) =>
+            s.id === currentSlot.id ? { ...s, exercise_id: data.assigned_exercise_id as string } : s
+          )
+        );
       }
 
-      if (typeof data.remaining_swaps === 'number') {
-        setManualSwapsRemaining(data.remaining_swaps);
-      } else if (data.remaining_swaps === null) {
-        setManualSwapsRemaining(null);
-      }
-      if (typeof data.assignment_limit === 'number') {
-        setFreeLimit(data.assignment_limit);
-      }
-      if (typeof data.remaining_assignments === 'number') {
-        setFreeRemaining(data.remaining_assignments);
-      } else if (data.remaining_assignments === null) {
-        setFreeRemaining(null);
-      }
+      if (typeof data.remaining_swaps === 'number') setSwapsRemaining(data.remaining_swaps);
+      else if (data.remaining_swaps === null) setSwapsRemaining(null);
 
       setExerciseError('');
       setIsAssigningSnack(false);
     };
 
     void requestSwap();
+  };
+
+  const handleSnooze = async (slotId: string, minutes: number) => {
+    setSnoozingSlotId(null);
+    // Optimistic update
+    setTodaySlots((prev) =>
+      prev.map((s) => {
+        if (s.id !== slotId) return s;
+        const base = new Date(s.scheduled_at ?? Date.now());
+        const from = base < new Date() ? new Date() : base;
+        const newAt = new Date(from.getTime() + minutes * 60_000);
+        return { ...s, scheduled_at: newAt.toISOString(), scheduled_at_local: null };
+      }),
+    );
+
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const { data } = await supabase.functions.invoke('allow-snack-assignment', {
+      body: {
+        action: 'snooze',
+        snooze_slot_id: slotId,
+        snooze_minutes: minutes,
+        day_key: new Date().toLocaleDateString('sv-SE', { timeZone: tz }),
+        timezone: tz,
+      },
+    });
+
+    if (data?.scheduled_at) {
+      setTodaySlots((prev) =>
+        prev.map((s) =>
+          s.id === slotId
+            ? { ...s, scheduled_at: data.scheduled_at, scheduled_at_local: data.scheduled_at_local }
+            : s,
+        ),
+      );
+    }
+  };
+
+  const handleSkip = async (slotId: string) => {
+    setSnoozingSlotId(null);
+    // Optimistic update
+    setTodaySlots((prev) => prev.map((s) => s.id === slotId ? { ...s, status: 'skipped' } : s));
+
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const { data } = await supabase.functions.invoke('allow-snack-assignment', {
+      body: {
+        action: 'skip',
+        skip_slot_id: slotId,
+        candidate_exercise_ids: exercises.map((e) => e.id),
+        day_key: new Date().toLocaleDateString('sv-SE', { timeZone: tz }),
+        timezone: tz,
+      },
+    });
+
+    if (data?.replacement_slot) {
+      setTodaySlots((prev) => [...prev, data.replacement_slot as DaySlot]);
+    }
+  };
+
+  const handleSurpriseMe = () => {
+    if (!isPremium) {
+      onUpgrade();
+      return;
+    }
+    const base = surprisePoolRef.current.length > 0 ? surprisePoolRef.current : exercises;
+    if (base.length === 0) return;
+
+    // Exclude today's scheduled exercises and the last surprised exercise to
+    // guarantee variety on repeated taps.
+    const scheduledIds = new Set(todaySlots.map((s) => s.exercise_id));
+    let pool = base.filter((e) => !scheduledIds.has(e.id) && e.id !== lastSurprisedIdRef.current);
+    // Relax gradually if exclusions leave nothing.
+    if (pool.length === 0) pool = base.filter((e) => e.id !== lastSurprisedIdRef.current);
+    if (pool.length === 0) pool = base;
+
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    lastSurprisedIdRef.current = pick.id;
+    onViewExercise(pick);
   };
 
   const handleSpaceAnalysis = async () => {
@@ -513,8 +676,10 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
     onNavigate('space-analysis');
   };
 
-  const weeklyGoal = 14;
-  const weeklyPercent = Math.min(100, Math.round((weeklyCount / weeklyGoal) * 100));
+  const weeklyGoal = slotLimit !== null ? slotLimit * 7 : null;
+  const weeklyPercent = weeklyGoal !== null
+    ? Math.min(100, Math.round((weeklyCount / weeklyGoal) * 100))
+    : null;
 
   return (
     <div className="min-h-screen pb-24 bg-stone-50 smooth-scroll">
@@ -545,6 +710,15 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
               >
                 <Camera className="w-5 h-5 text-slate-600" />
               </button>
+              {import.meta.env.DEV && (
+                <button
+                  onClick={handleDevReset}
+                  className="touch-target px-2.5 py-1.5 text-xs font-semibold bg-rose-100 text-rose-700 hover:bg-rose-200 rounded-lg transition-smooth active:scale-95"
+                  title="DEV: reset today's snacks"
+                >
+                  Reset
+                </button>
+              )}
               <button
                 onClick={() => onNavigate('settings')}
                 className="touch-target p-2.5 sm:p-2 hover:bg-stone-100 rounded-lg transition-smooth active:scale-95"
@@ -575,8 +749,8 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
           </div>
         )}
 
-        {/* Premium Upgrade Banner */}
-        {!isPremium && (
+        {/* Premium Upgrade Banner — only shown when limit is close or reached */}
+        {!isPremium && freeRemaining !== null && freeRemaining <= 1 && (
           <div className="mb-6 sm:mb-8 animate-scale-in">
             <div className="bg-gradient-to-r from-orange-500 to-orange-600 rounded-2xl sm:rounded-3xl p-5 sm:p-6 shadow-xl border-2 border-orange-400 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-8 translate-x-8"></div>
@@ -588,15 +762,13 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
                     <h3 className="text-xl sm:text-2xl font-bold text-white">Upgrade to Premium</h3>
                   </div>
                   <p className="text-white/95 text-sm sm:text-base mb-3">
-                    {freeRemaining === null
-                      ? `Autopilot quotas reset daily. Get unlimited access with Premium.`
-                      : freeRemaining > 0
-                        ? `${freeRemaining} of ${freeLimit} free auto-snack assignments remaining today.`
-                        : `You've reached your free auto-snack assignment limit for today.`
+                    {freeRemaining === 0
+                      ? `You've used all your snacks for today. Upgrade to keep moving whenever you feel like it.`
+                      : `1 snack slot left today. Upgrade to move on your schedule, not ours.`
                     }
                   </p>
                   <ul className="space-y-1.5">
-                    {['Unlimited exercises', 'Space analysis', 'Custom plans', 'Progress tracking'].map((feature, idx) => (
+                    {['Surprise Me — move any time you feel peckish', '5 pre-planned snacks every day', 'Snooze or skip without losing your slot', 'AI Space Analysis'].map((feature, idx) => (
                       <li key={idx} className="flex items-center gap-2 text-white/95 text-xs sm:text-sm">
                         <Sparkles className="w-4 h-4 flex-shrink-0" />
                         {feature}
@@ -636,19 +808,19 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
           <StatCard
             icon={<Award className="w-5 h-5" />}
             label="Weekly Goal"
-              value={`${weeklyPercent}%`}
-              subValue={`${weeklyCount} of ${weeklyGoal} snacks`}
+              value={weeklyPercent !== null ? `${weeklyPercent}%` : `${weeklyCount}`}
+              subValue={weeklyGoal !== null ? `${weeklyCount} of ${weeklyGoal} snacks` : 'snacks this week'}
             color="bg-orange-500"
             delay="0.2s"
           />
         </div>
 
         {/* Quick Actions */}
-        <div className="grid sm:grid-cols-2 gap-3 sm:gap-4 mb-6 sm:mb-8">
+        <div className="grid sm:grid-cols-3 gap-3 sm:gap-4 mb-6 sm:mb-8">
           <button
             onClick={handleStartAssignedSnack}
             className="touch-target group relative overflow-hidden bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 active:scale-95 text-white rounded-2xl p-5 sm:p-6 transition-smooth hover:scale-[1.02] hover:-translate-y-1 shadow-lg hover:shadow-xl text-left"
-            disabled={!assignedExercise}
+            disabled={!currentExercise}
           >
             <div className="relative flex items-center justify-between">
               <div>
@@ -656,14 +828,44 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
                   <div className="bg-white/20 p-1.5 sm:p-2 rounded-lg group-hover:scale-110 transition-smooth">
                     <Zap className="w-5 h-5 sm:w-6 sm:h-6" />
                   </div>
-                  <h3 className="text-lg sm:text-xl font-bold">Start Auto Snack</h3>
+                  <h3 className="text-lg sm:text-xl font-bold">Start Snack</h3>
                 </div>
                 <p className="text-white/95 text-xs sm:text-sm">
-                  Jump straight into today&apos;s assigned snack
+                  Jump into your assigned snack
                 </p>
               </div>
               <div className="text-3xl sm:text-4xl opacity-50 group-hover:opacity-75 transition-smooth">
                 ⚡
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={handleSurpriseMe}
+            className="touch-target group relative bg-white border-2 border-stone-200 hover:border-violet-400 hover:bg-violet-50 active:scale-95 text-slate-900 rounded-2xl p-5 sm:p-6 transition-smooth hover:scale-[1.02] hover:-translate-y-1 shadow-sm hover:shadow-lg text-left"
+          >
+            {!isPremium && (
+              <div className="absolute top-3 right-3 bg-orange-600 text-white p-1.5 rounded-lg shadow-md">
+                <Lock className="w-4 h-4" />
+              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="bg-violet-100 p-1.5 sm:p-2 rounded-lg group-hover:scale-110 transition-smooth">
+                    <Shuffle className="w-5 h-5 sm:w-6 sm:h-6 text-violet-600" />
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-bold flex items-center gap-2">
+                    Surprise Me
+                    {!isPremium && <span className="text-xs font-semibold text-orange-600">PREMIUM</span>}
+                  </h3>
+                </div>
+                <p className="text-slate-600 text-xs sm:text-sm">
+                  Feeling peckish? Move right now
+                </p>
+              </div>
+              <div className="text-3xl sm:text-4xl opacity-30 group-hover:opacity-50 transition-smooth">
+                🎲
               </div>
             </div>
           </button>
@@ -699,81 +901,270 @@ export default function Dashboard({ onViewExercise, onNavigate, userId, userPref
           </button>
         </div>
 
-        {/* Date Filter */}
-        <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-          {['today', 'tomorrow', 'this-week'].map((period) => (
-            <button
-              key={period}
-              onClick={() => setSelectedDate(period)}
-              className={`px-4 py-2 rounded-full font-medium transition-all whitespace-nowrap ${
-                selectedDate === period
-                  ? 'bg-orange-600 text-white shadow-md'
-                  : 'bg-white text-slate-600 hover:bg-orange-50 border border-stone-200 hover:border-orange-300'
-              }`}
-            >
-              {period === 'today' && 'Today'}
-              {period === 'tomorrow' && 'Tomorrow'}
-              {period === 'this-week' && 'This Week'}
-            </button>
-          ))}
-        </div>
-
-        {/* Scheduled Exercises */}
+        {/* Today's Snack Plan */}
         <div className="space-y-4">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-4">
             <h2 className="text-2xl font-bold text-slate-900">
-              Today&apos;s Auto-Assigned Snack
+              {isPremium ? "Today's Movement Plan" : "Today's Snacks"}
             </h2>
-            <span className="text-sm text-slate-500 font-medium">
-              {assignedExercise ? 'Autopilot active' : 'No snack available'}
-            </span>
-          </div>
-
-          <div className="space-y-3">
-            {isLoadingExercises && (
-              <div className="text-sm text-slate-500">Loading exercises...</div>
-            )}
-            {!isLoadingExercises && exerciseError && (
-              <div className="text-sm text-red-600">{exerciseError}</div>
-            )}
-            {!isLoadingExercises && !exerciseError && assignedExercise && (
-              <ExerciseCard
-                exercise={assignedExercise}
-                onClick={handleStartAssignedSnack}
-                index={0}
-                isAutopilot
-              />
-            )}
-            {!isLoadingExercises && !exerciseError && assignedExercise && exercises.length > 1 && (
-              <div className="flex items-center justify-between rounded-xl border border-stone-200 bg-white px-4 py-3">
-                <p className="text-sm text-slate-600">
-                  Want a different snack?
-                </p>
-                <button
-                  type="button"
-                  onClick={handleSwapAssignedSnack}
-                  disabled={isAssigningSnack}
-                  className="rounded-lg bg-stone-900 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800"
-                >
-                  {isAssigningSnack ? 'Swapping...' : `Swap Snack ${!isPremium && manualSwapsRemaining !== null ? `(${manualSwapsRemaining} left)` : ''}`}
-                </button>
-              </div>
-            )}
-            {!isLoadingExercises && !exerciseError && !assignedExercise && (
-              <div className="text-sm text-slate-500">No matching snacks found. Update preferences to broaden options.</div>
+            {isPremium ? (
+              <span className="text-sm font-semibold text-orange-600 bg-orange-50 px-3 py-1 rounded-full border border-orange-200">
+                {slotsConsumed} of 5 done
+              </span>
+            ) : slotLimit !== null && (
+              <span className="text-sm text-slate-500 font-medium">
+                {slotsConsumed} of {slotLimit} done
+              </span>
             )}
           </div>
-        </div>
 
-        {/* Empty State Message */}
-        <div className="mt-8 bg-white rounded-2xl p-8 text-center border border-stone-200 shadow-sm">
-          <Calendar className="w-12 h-12 text-slate-400 mx-auto mb-3" />
-          <h3 className="text-lg font-semibold text-slate-900 mb-2">
-            AI Scheduling Coming Soon
-          </h3>
-          <p className="text-slate-600 text-sm">
-            Connect your calendar to automatically schedule kinetic snacks in your free time
-          </p>
+          {isLoadingExercises && (
+            <div className="text-sm text-slate-500">Loading your snack plan...</div>
+          )}
+          {!isLoadingExercises && exerciseError && (
+            <div className="text-sm text-red-600">{exerciseError}</div>
+          )}
+
+          {!isLoadingExercises && !exerciseError && (
+            <div className="space-y-3">
+              {isPremium ? (
+                /* ── Premium full-day timeline ── */
+                <>
+                  {todaySlots.length === 0 && (
+                    <div className="text-sm text-slate-500">Building your movement plan…</div>
+                  )}
+
+                  {/* Completed slots */}
+                  {todaySlots
+                    .filter((s) => s.status === 'completed')
+                    .map((slot) => {
+                      const ex = exercises.find((e) => e.id === slot.exercise_id);
+                      return (
+                        <div key={slot.id} className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                          <span className="flex-1 font-medium text-emerald-900 line-through decoration-emerald-400">
+                            {ex?.title ?? 'Snack'}
+                          </span>
+                          {slot.scheduled_at_local && (
+                            <span className="text-xs text-emerald-600">{slot.scheduled_at_local}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                  {/* Current / ready slot */}
+                  {currentExercise && currentSlot && (
+                    <>
+                      <ExerciseCard
+                        exercise={currentExercise}
+                        onClick={handleStartAssignedSnack}
+                        index={0}
+                        isAutopilot
+                      />
+                      <div className="flex items-center gap-2 flex-wrap rounded-xl border border-stone-200 bg-white px-4 py-3">
+                        {exercises.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={handleSwapAssignedSnack}
+                            disabled={isAssigningSnack}
+                            className="rounded-lg bg-stone-900 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800 disabled:opacity-50"
+                          >
+                            {isAssigningSnack ? 'Swapping…' : 'Swap exercise'}
+                          </button>
+                        )}
+                        <span className="text-xs text-slate-400 hidden sm:inline">Not now?</span>
+                        <button
+                          type="button"
+                          onClick={() => setSnoozingSlotId((id) => id === currentSlot.id ? null : currentSlot.id)}
+                          className="flex items-center gap-1 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-stone-50"
+                        >
+                          <FastForward className="w-3 h-3" />
+                          Snooze
+                        </button>
+                        {snoozingSlotId === currentSlot.id && (
+                          <>
+                            <button type="button" onClick={() => handleSnooze(currentSlot.id, 30)}
+                              className="rounded-lg bg-orange-50 border border-orange-200 px-3 py-2 text-xs font-semibold text-orange-700 hover:bg-orange-100">
+                              +30 min
+                            </button>
+                            <button type="button" onClick={() => handleSnooze(currentSlot.id, 60)}
+                              className="rounded-lg bg-orange-50 border border-orange-200 px-3 py-2 text-xs font-semibold text-orange-700 hover:bg-orange-100">
+                              +1 hr
+                            </button>
+                            <button type="button" onClick={() => handleSkip(currentSlot.id)}
+                              className="flex items-center gap-1 rounded-lg border border-stone-200 px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-stone-50">
+                              <X className="w-3 h-3" />
+                              Skip
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* Upcoming slots */}
+                  {todaySlots
+                    .filter((s) => s.status === 'pending' && s.id !== currentSlot?.id && !isSlotReady(s))
+                    .sort((a, b) => new Date(a.scheduled_at!).getTime() - new Date(b.scheduled_at!).getTime())
+                    .map((slot) => {
+                      const ex = exercises.find((e) => e.id === slot.exercise_id);
+                      const isExpanded = snoozingSlotId === slot.id;
+                      return (
+                        <div key={slot.id} className="rounded-xl border border-stone-100 bg-white px-4 py-3 text-sm">
+                          <div className="flex items-center gap-3">
+                            <Clock className="w-4 h-4 text-orange-400 flex-shrink-0" />
+                            <span className="text-xs font-semibold text-slate-500 w-16 shrink-0">
+                              {slot.scheduled_at_local ?? '—'}
+                            </span>
+                            <span className="flex-1 font-medium text-slate-700 truncate">
+                              {ex?.title ?? 'Snack'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setSnoozingSlotId((id) => id === slot.id ? null : slot.id)}
+                              className="flex items-center gap-1 rounded-lg border border-stone-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-stone-50 shrink-0"
+                            >
+                              <FastForward className="w-3 h-3" />
+                              Adjust
+                            </button>
+                          </div>
+                          {isExpanded && (
+                            <div className="flex items-center gap-2 mt-2 pl-7 flex-wrap">
+                              <button type="button" onClick={() => handleSnooze(slot.id, 30)}
+                                className="rounded-lg bg-orange-50 border border-orange-200 px-3 py-1.5 text-xs font-semibold text-orange-700 hover:bg-orange-100">
+                                +30 min
+                              </button>
+                              <button type="button" onClick={() => handleSnooze(slot.id, 60)}
+                                className="rounded-lg bg-orange-50 border border-orange-200 px-3 py-1.5 text-xs font-semibold text-orange-700 hover:bg-orange-100">
+                                +1 hr
+                              </button>
+                              <button type="button" onClick={() => handleSkip(slot.id)}
+                                className="flex items-center gap-1 rounded-lg border border-stone-200 px-3 py-1.5 text-xs font-semibold text-slate-500 hover:bg-stone-50">
+                                <X className="w-3 h-3" />
+                                Skip — find me another time
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                  {/* Skipped slots */}
+                  {todaySlots
+                    .filter((s) => s.status === 'skipped')
+                    .map((slot) => {
+                      const ex = exercises.find((e) => e.id === slot.exercise_id);
+                      return (
+                        <div key={slot.id} className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50 px-4 py-3 text-sm opacity-50">
+                          <X className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                          <span className="flex-1 font-medium text-slate-500 line-through">
+                            {ex?.title ?? 'Snack'}
+                          </span>
+                          <span className="text-xs text-slate-400">skipped</span>
+                        </div>
+                      );
+                    })}
+
+                  {/* All done */}
+                  {todaySlots.length > 0 && todaySlots.every((s) => s.status === 'completed' || s.status === 'skipped') && (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-center">
+                      <p className="text-sm font-semibold text-emerald-800">Movement plan complete! 🎉</p>
+                      <p className="text-xs text-emerald-700 mt-1">Great work today. See you tomorrow.</p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                /* ── Free user view (unchanged) ── */
+                <>
+                  {currentExercise && currentSlot && (
+                    <>
+                      <ExerciseCard
+                        exercise={currentExercise}
+                        onClick={handleStartAssignedSnack}
+                        index={0}
+                        isAutopilot
+                      />
+                      {exercises.length > 1 && (
+                        <div className="flex items-center justify-between rounded-xl border border-stone-200 bg-white px-4 py-3">
+                          <p className="text-sm text-slate-600">Not feeling this one?</p>
+                          <button
+                            type="button"
+                            onClick={handleSwapAssignedSnack}
+                            disabled={isAssigningSnack}
+                            className="rounded-lg bg-stone-900 px-3 py-2 text-xs font-semibold text-white hover:bg-stone-800 disabled:opacity-50"
+                          >
+                            {isAssigningSnack
+                              ? 'Swapping...'
+                              : `Swap${swapsRemaining !== null ? ` (${swapsRemaining} left)` : ''}`}
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {todaySlots.filter((s) => s.status === 'completed').map((slot) => {
+                    const ex = exercises.find((e) => e.id === slot.exercise_id);
+                    return (
+                      <div key={slot.id} className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                        <span className="flex-1 font-medium text-emerald-900 line-through decoration-emerald-400">
+                          {ex?.title ?? 'Snack'}
+                        </span>
+                        {slot.scheduled_at_local && (
+                          <span className="text-xs text-emerald-600">{slot.scheduled_at_local}</span>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {todaySlots.filter((s) => s.status === 'pending' && s.id !== currentSlot?.id && !isSlotReady(s)).length > 0 && (
+                    <div className="mt-2 space-y-2">
+                      {todaySlots
+                        .filter((s) => s.status === 'pending' && s.id !== currentSlot?.id && !isSlotReady(s))
+                        .map((slot) => (
+                          <div key={slot.id} className="flex items-center gap-3 rounded-xl border border-stone-100 bg-white px-4 py-3 text-sm text-slate-600">
+                            <Clock className="w-4 h-4 text-orange-400 flex-shrink-0" />
+                            <span>
+                              Next snack at{' '}
+                              <span className="font-semibold text-slate-900">{slot.scheduled_at_local ?? '—'}</span>
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+
+                  {!currentExercise && todaySlots.length === 0 && (
+                    <div className="text-sm text-slate-500">
+                      No matching snacks found. Update your preferences to broaden options.
+                    </div>
+                  )}
+
+                  {!currentExercise && todaySlots.length > 0 && todaySlots.every((s) => s.status === 'completed' || s.status === 'skipped') && (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-center">
+                      <p className="text-sm font-semibold text-emerald-800">All done for today! 🎉</p>
+                      <p className="text-xs text-emerald-700 mt-1">Your snacks reset tomorrow.</p>
+                    </div>
+                  )}
+
+                  {nextSlotLocalTime && !currentExercise && (
+                    <div className="mt-2 bg-white rounded-2xl p-5 border border-stone-200 shadow-sm flex items-center gap-3">
+                      <div className="bg-orange-100 p-2.5 rounded-xl">
+                        <Calendar className="w-5 h-5 text-orange-600" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">
+                          Your next snack is at {nextSlotLocalTime}
+                        </p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          We&apos;ll remind you when it&apos;s time to move.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

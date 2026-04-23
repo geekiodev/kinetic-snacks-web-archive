@@ -1,4 +1,6 @@
 import { ArrowLeft, Clock, Zap, CheckCircle2, Play, Sparkles, Trophy, Timer } from 'lucide-react';
+
+const CELEBRATION_DISMISS_MS = 2500;
 import { Exercise } from '../App';
 import { useState, useEffect } from 'react';
 
@@ -65,7 +67,7 @@ export default function ExerciseDetail({ exercise, onBack, onComplete }: Exercis
     setShowCelebration(true);
     setTimeout(() => {
       onBack();
-    }, 2500);
+    }, CELEBRATION_DISMISS_MS);
   };
 
   const progressPercentage = (completedSteps.length / exercise.instructions.length) * 100;

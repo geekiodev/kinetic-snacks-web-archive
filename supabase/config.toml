@@ -1,0 +1,40 @@
+project_id = "yojxvryewwnapxzgqmso"
+
+[functions.complete-exercise]
+verify_jwt = false
+
+[functions.complete-onboarding]
+verify_jwt = false
+
+[functions.get-subscription-status]
+verify_jwt = false
+
+[functions.update-user-preferences]
+verify_jwt = false
+
+[functions.allow-ai-plan-generation]
+verify_jwt = false
+
+[functions.allow-exercise-generation]
+verify_jwt = false
+
+[functions.allow-export]
+verify_jwt = false
+
+[functions.allow-snack-assignment]
+verify_jwt = false
+
+[functions.allow-space-analysis]
+verify_jwt = false
+
+[functions.analyze-space]
+verify_jwt = false
+
+[functions.notifications-dispatch]
+verify_jwt = false
+
+[functions.notifications-feedback]
+verify_jwt = false
+
+[functions.notifications-plan]
+verify_jwt = false

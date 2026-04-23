@@ -21,55 +21,74 @@ const mockedState = vi.hoisted(() => {
 
   let swapUsed = false;
 
-  const invokeMock = vi.fn().mockImplementation(async (fnName: string, payload?: { body?: { swap?: boolean } }) => {
-    if (fnName === 'notifications-plan') {
-      return {
-        data: { send_now: false, reason: 'quiet_hours', nudge_type: null },
-        error: null,
-      };
-    }
-
-    if (fnName === 'allow-snack-assignment') {
-      const isSwap = payload?.body?.swap === true;
-      if (!isSwap) {
+  const invokeMock = vi.fn().mockImplementation(
+    async (fnName: string, payload?: { body?: { action?: string } }) => {
+      if (fnName === 'notifications-plan') {
         return {
-          data: {
-            allowed: true,
-            assigned_exercise_id: exercise.id,
-            remaining_swaps: swapUsed ? 0 : 1,
-          },
+          data: { send_now: false, reason: 'quiet_hours', nudge_type: null },
           error: null,
         };
       }
 
-      if (!swapUsed) {
-        swapUsed = true;
-        return {
-          data: {
-            allowed: true,
-            assigned_exercise_id: backupExercise.id,
-            remaining_swaps: 0,
-          },
-          error: null,
-        };
+      if (fnName === 'allow-snack-assignment') {
+        const action = payload?.body?.action ?? 'plan';
+
+        if (action === 'plan') {
+          return {
+            data: {
+              slots: [{
+                id: 'slot-1',
+                status: 'notified',
+                exercise_id: exercise.id,
+                scheduled_at: new Date().toISOString(),
+                scheduled_at_local: '9:00 AM',
+                source: 'auto',
+              }],
+              active_slot: { id: 'slot-1', exercise_id: exercise.id, scheduled_at: new Date().toISOString() },
+              next_slot: null,
+              slot_limit: 3,
+              slots_planned: 1,
+              slots_consumed: 0,
+              remaining_slots: 3,
+              swap_limit: 1,
+              remaining_swaps: swapUsed ? 0 : 1,
+            },
+            error: null,
+          };
+        }
+
+        if (action === 'swap') {
+          if (!swapUsed) {
+            swapUsed = true;
+            return {
+              data: {
+                allowed: true,
+                slot_id: 'slot-1',
+                assigned_exercise_id: backupExercise.id,
+                swap_limit: 1,
+                remaining_swaps: 0,
+              },
+              error: null,
+            };
+          }
+          return {
+            data: {
+              allowed: false,
+              reason: 'swap_limit_reached',
+              swap_limit: 1,
+              remaining_swaps: 0,
+            },
+            error: null,
+          };
+        }
       }
 
       return {
-        data: {
-          allowed: false,
-          reason: 'swap_limit_reached',
-          assigned_exercise_id: backupExercise.id,
-          remaining_swaps: 0,
-        },
+        data: { allowed: false, remaining: 0, limit: 3 },
         error: null,
       };
-    }
-
-    return {
-      data: { allowed: false, remaining: 0, limit: 3 },
-      error: null,
-    };
-  });
+    },
+  );
 
   const fromMock = vi.fn((table: string) => {
     if (table === 'exercise_completions') {
@@ -85,19 +104,6 @@ const mockedState = vi.hoisted(() => {
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockResolvedValue({ data: [exercise, backupExercise], error: null }),
       };
-    }
-
-    if (table === 'exercise_views') {
-      const chain: { select: () => typeof chain; eq: (col: string) => typeof chain | Promise<{ count: number; error: null }> } = {
-        select: () => chain,
-        eq: (col: string) => {
-          if (col === 'day_key') {
-            return Promise.resolve({ count: 0, error: null });
-          }
-          return chain;
-        },
-      };
-      return chain;
     }
 
     return {
@@ -153,25 +159,28 @@ describe('Dashboard free-tier gating', () => {
       />,
     );
 
+    // Nudge status from dry-run
     expect(await screen.findByText(/Quiet hours are active/i)).toBeInTheDocument();
     expect(mockedState.invokeMock).toHaveBeenCalledWith('notifications-plan', expect.objectContaining({
       body: expect.objectContaining({ dry_run: true }),
     }));
 
+    // Exercise card is rendered and clickable without triggering upgrade
     const card = await screen.findByRole('button', { name: /Test Snack/i });
     fireEvent.click(card);
-
     expect(onUpgrade).not.toHaveBeenCalled();
-    expect(onViewExercise).toHaveBeenCalledWith(expect.objectContaining({ id: 'ex-1' }));
+    expect(onViewExercise).toHaveBeenCalledWith(expect.objectContaining({ id: 'ex-1' }), expect.any(String));
 
-    const swapButton = screen.getByRole('button', { name: /Swap Snack/i });
+    // Swap button shows remaining count and performs swap
+    const swapButton = screen.getByRole('button', { name: /Swap/i });
     fireEvent.click(swapButton);
     await waitFor(() => {
       expect(screen.getByText(/Backup Snack/i)).toBeInTheDocument();
     });
     expect(screen.getByText(/0 left/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Swap Snack/i }));
+    // Second swap attempt is blocked
+    fireEvent.click(screen.getByRole('button', { name: /Swap/i }));
     await waitFor(() => {
       expect(screen.getByText(/used your free daily swap/i)).toBeInTheDocument();
     });
