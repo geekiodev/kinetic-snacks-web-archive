@@ -18,13 +18,22 @@ const jsonResponse = (status: number, body: Record<string, unknown>) =>
 
 type Payload = {
   day_key?: string;
-  /** 'plan'  — get today's plan, creating slots if needed (default)
-   *  'swap'  — swap the exercise on an existing slot              */
-  action?: 'plan' | 'swap';
+  /** IANA timezone string from the client (e.g. 'America/New_York').
+   *  When present, takes precedence over the value stored in notification_preferences. */
+  timezone?: string;
+  action?: 'plan' | 'swap' | 'snooze' | 'skip';
   /** Required for action='swap': the slot id to swap. */
   swap_slot_id?: string;
+  /** Required for action='snooze': the slot id to push forward. */
+  snooze_slot_id?: string;
+  /** Minutes to push the slot forward. Defaults to 30. */
+  snooze_minutes?: number;
+  /** Required for action='skip': the slot id to skip. */
+  skip_slot_id?: string;
   /** Candidate exercise IDs (client has already filtered by preferences). */
   candidate_exercise_ids?: string[];
+  /** Dev-only: schedule all slots within the next few minutes for easy testing. */
+  dev_mode?: boolean;
 };
 
 type SlotRow = {
@@ -61,6 +70,8 @@ Deno.serve(async (req) => {
 
   const body = (await req.json().catch(() => ({}))) as Payload;
   const now    = new Date();
+  // day_key should always be sent by the client in their local timezone.
+  // Fallback uses UTC which may be wrong — client should always supply this.
   const dayKey = body.day_key ?? now.toISOString().slice(0, 10);
   const action = body.action ?? 'plan';
   const candidateIds = (body.candidate_exercise_ids ?? []).filter(Boolean);
@@ -86,7 +97,7 @@ Deno.serve(async (req) => {
       .maybeSingle(),
     supabase
       .from('notification_policy_config')
-      .select('min_minutes_between_snacks_free,min_minutes_between_snacks_premium')
+      .select('min_minutes_between_snacks_free,min_minutes_between_snacks_premium,premium_daily_snack_goal')
       .eq('id', 'global')
       .maybeSingle(),
   ]);
@@ -96,13 +107,18 @@ Deno.serve(async (req) => {
   const slots       = (slotRows ?? []) as SlotRow[];
   const slotLimit   = entitlements.daily_snack_slots;
   const swapLimit   = entitlements.daily_swap_slots;
-  const timezone    = (prefRow as { timezone?: string } | null)?.timezone ?? 'UTC';
+  // Prefer the client-supplied timezone (already in local context) over the DB-stored value,
+  // which may have been set to 'UTC' during onboarding before the user's real TZ was known.
+  const timezone    = body.timezone ?? (prefRow as { timezone?: string } | null)?.timezone ?? 'UTC';
   const reminderWindow = (prefRow as { reminder_window?: string } | null)?.reminder_window ?? 'anytime';
   const isPremium   = entitlements.can_use_space_analysis;
 
   const minGapMinutes = isPremium
     ? ((policyRow as { min_minutes_between_snacks_premium?: number } | null)?.min_minutes_between_snacks_premium ?? 60)
     : ((policyRow as { min_minutes_between_snacks_free?: number } | null)?.min_minutes_between_snacks_free ?? 90);
+
+  const premiumDailyGoal =
+    (policyRow as { premium_daily_snack_goal?: number } | null)?.premium_daily_snack_goal ?? 5;
 
   const swapsUsed = slots.filter((s) => s.source === 'manual_swap').length;
 
@@ -128,8 +144,20 @@ Deno.serve(async (req) => {
       return jsonResponse(404, { error: 'Slot not found.' });
     }
 
-    // Pick any candidate that isn't the current exercise.
-    const available = candidateIds.filter((id) => id !== targetSlot.exercise_id);
+    // Exclude the current exercise AND any exercise already assigned to another
+    // slot today (pending, active, notified, completed) to avoid duplicates.
+    const usedInOtherSlots = new Set(
+      slots
+        .filter((s) => s.id !== body.swap_slot_id && s.status !== 'skipped' && s.status !== 'cancelled')
+        .map((s) => s.exercise_id),
+    );
+    let available = candidateIds.filter(
+      (id) => id !== targetSlot.exercise_id && !usedInOtherSlots.has(id),
+    );
+    // If strict exclusion leaves nothing, relax to just avoiding the current exercise.
+    if (available.length === 0) {
+      available = candidateIds.filter((id) => id !== targetSlot.exercise_id);
+    }
     if (available.length === 0) {
       return jsonResponse(200, {
         allowed: false,
@@ -139,7 +167,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    const newExerciseId = available[0];
+    // Pick randomly so repeated swaps don't cycle through the same sequence.
+    const newExerciseId = available[Math.floor(Math.random() * available.length)];
     const { error: updateError } = await supabase
       .from('daily_snack_assignments')
       .update({ exercise_id: newExerciseId, source: 'manual_swap' })
@@ -158,12 +187,124 @@ Deno.serve(async (req) => {
     });
   }
 
+  // ── SNOOZE action ─────────────────────────────────────────────────────────
+  if (action === 'snooze') {
+    if (!body.snooze_slot_id) {
+      return jsonResponse(400, { error: 'snooze_slot_id is required for action=snooze.' });
+    }
+    const targetSlot = slots.find((s) => s.id === body.snooze_slot_id);
+    if (!targetSlot) return jsonResponse(404, { error: 'Slot not found.' });
+
+    const snoozeMs = (body.snooze_minutes ?? 30) * 60 * 1000;
+    const baseTime = new Date(targetSlot.scheduled_at ?? now.toISOString());
+    // If the slot is already overdue, snooze from now instead of from the past.
+    const snoozeFrom = baseTime < now ? now : baseTime;
+    const newAt = new Date(snoozeFrom.getTime() + snoozeMs);
+
+    const { error: updateError } = await supabase
+      .from('daily_snack_assignments')
+      .update({ scheduled_at: newAt.toISOString(), status: 'pending' })
+      .eq('id', body.snooze_slot_id)
+      .eq('user_id', userId);
+
+    if (updateError) return jsonResponse(500, { error: updateError.message });
+
+    return jsonResponse(200, {
+      slot_id: body.snooze_slot_id,
+      scheduled_at: newAt.toISOString(),
+      scheduled_at_local: formatLocalTime(newAt.toISOString(), timezone),
+    });
+  }
+
+  // ── SKIP action ───────────────────────────────────────────────────────────
+  if (action === 'skip') {
+    if (!body.skip_slot_id) {
+      return jsonResponse(400, { error: 'skip_slot_id is required for action=skip.' });
+    }
+
+    const { error: updateError } = await supabase
+      .from('daily_snack_assignments')
+      .update({ status: 'skipped' })
+      .eq('id', body.skip_slot_id)
+      .eq('user_id', userId);
+
+    if (updateError) return jsonResponse(500, { error: updateError.message });
+
+    // Attempt to schedule a replacement slot later in the day.
+    const PREMIUM_DAILY_GOAL = premiumDailyGoal;
+    const postSkipSlots = slots.map((s) =>
+      s.id === body.skip_slot_id ? { ...s, status: 'skipped' } : s,
+    );
+    const nonSkippedCount = postSkipSlots.filter(
+      (s) => s.status !== 'skipped' && s.status !== 'cancelled',
+    ).length;
+    const effectiveLimitForSkip = slotLimit ?? PREMIUM_DAILY_GOAL;
+    const replacementNeeded = slotsNeededToday({
+      slotLimit: effectiveLimitForSkip,
+      slotsPlanned: nonSkippedCount,
+    });
+
+    let replacementSlot = null;
+
+    if (replacementNeeded > 0 && candidateIds.length > 0) {
+      const win = windowFromReminderPreference(reminderWindow);
+      const replacementTimes = planSlots({
+        slotsNeeded: 1,
+        window: win,
+        minGapMinutes,
+        dayKey,
+        timezone,
+        existingScheduledAts: postSkipSlots
+          .map((s) => s.scheduled_at ?? '')
+          .filter(Boolean),
+        nowISO: now.toISOString(),
+      });
+
+      if (replacementTimes.length > 0) {
+        const usedIds = new Set(postSkipSlots.map((s) => s.exercise_id));
+        const available = candidateIds.filter((id) => !usedIds.has(id));
+        const pool = available.length > 0 ? available : candidateIds;
+
+        const { data: inserted } = await supabase
+          .from('daily_snack_assignments')
+          .insert({
+            user_id:          userId,
+            day_key:          dayKey,
+            assignment_index: postSkipSlots.length + 1,
+            exercise_id:      pool[0],
+            source:           'auto',
+            status:           'pending',
+            scheduled_at:     replacementTimes[0].toISOString(),
+          })
+          .select('id,assignment_index,exercise_id,source,status,scheduled_at')
+          .single();
+
+        if (inserted) {
+          replacementSlot = {
+            id:                  inserted.id,
+            status:              inserted.status,
+            exercise_id:         inserted.exercise_id,
+            scheduled_at:        inserted.scheduled_at,
+            scheduled_at_local:  formatLocalTime(inserted.scheduled_at!, timezone),
+            source:              inserted.source,
+          };
+        }
+      }
+    }
+
+    return jsonResponse(200, {
+      skipped_slot_id: body.skip_slot_id,
+      replacement_slot: replacementSlot,
+    });
+  }
+
   // ── PLAN action (default) ─────────────────────────────────────────────────
-  // Determine how many more slots we need to plan for today.
-  // For premium (slotLimit = null) we plan one slot at a time on demand
-  // rather than pre-planning an unknown number.
-  const effectiveSlotLimit = slotLimit ?? (slots.length + 1);
-  const needed = slotsNeededToday({ slotLimit: effectiveSlotLimit, slotsPlanned: slots.length });
+  // For premium users (slotLimit = null) pre-plan PREMIUM_DAILY_GOAL slots
+  // upfront rather than one at a time, giving users a full-day movement plan.
+  const PREMIUM_DAILY_GOAL = 5;
+  const nonSkippedSlots = slots.filter((s) => s.status !== 'skipped' && s.status !== 'cancelled');
+  const effectiveSlotLimit = slotLimit ?? PREMIUM_DAILY_GOAL;
+  const needed = slotsNeededToday({ slotLimit: effectiveSlotLimit, slotsPlanned: nonSkippedSlots.length });
 
   if (needed > 0 && candidateIds.length === 0) {
     return jsonResponse(400, { error: 'candidate_exercise_ids is required to plan new slots.' });
@@ -172,14 +313,37 @@ Deno.serve(async (req) => {
   let allSlots = [...slots];
 
   if (needed > 0) {
-    const window  = windowFromReminderPreference(reminderWindow);
+    // In dev_mode, compress all slots into the next ~10 minutes for quick testing.
+    const devMode = body.dev_mode === true;
+    let window = windowFromReminderPreference(reminderWindow);
+    let effectiveMinGap = minGapMinutes;
+
+    if (devMode) {
+      const nowLocal = now.toLocaleString('en-US', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: false });
+      const [hh, mm] = nowLocal.split(':').map(Number);
+      const startMin = mm + 1;
+      const endMin   = startMin + Math.max(needed * 2 + 2, 10);
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const clampHH = (h: number, m: number) => {
+        const totalH = h + Math.floor(m / 60);
+        return { h: Math.min(totalH, 23), m: m % 60 };
+      };
+      const start = clampHH(hh, startMin);
+      const end   = clampHH(hh, endMin);
+      window = {
+        startHHMM: `${pad(start.h)}:${pad(start.m)}`,
+        endHHMM:   `${pad(end.h)}:${pad(end.m)}`,
+      };
+      effectiveMinGap = 1;
+    }
+
     const newTimes = planSlots({
       slotsNeeded: needed,
       window,
-      minGapMinutes,
+      minGapMinutes: effectiveMinGap,
       dayKey,
       timezone,
-      existingScheduledAts: slots.map((s) => s.scheduled_at ?? '').filter(Boolean),
+      existingScheduledAts: nonSkippedSlots.map((s) => s.scheduled_at ?? '').filter(Boolean),
       nowISO: now.toISOString(),
     });
 

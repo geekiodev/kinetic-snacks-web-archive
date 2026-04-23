@@ -60,6 +60,18 @@ const isEquipmentCompatible = (exerciseEquipment: string[], availableEquipment: 
   return exerciseEquipment.every((item) => available.has(normalize(item)));
 };
 
+export const isSafeForLimitations = (
+  candidate: Exercise,
+  limitations: string[],
+  limitationRules: LimitationRuleMap,
+): boolean => {
+  const activeLimitations = limitations.filter((l) => normalize(l) !== 'none');
+  if (activeLimitations.length === 0) return true;
+  if (violatesContraindications(candidate, activeLimitations)) return false;
+  if (violatesKeywordRules(candidate, activeLimitations, limitationRules)) return false;
+  return true;
+};
+
 const violatesContraindications = (candidate: Exercise, limitations: string[]) => {
   const contraindications = new Set((candidate.contraindicationTags ?? []).map(normalize));
   if (contraindications.size === 0) return false;

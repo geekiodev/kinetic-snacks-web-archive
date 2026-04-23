@@ -7,7 +7,8 @@ interface AuthProps {
 }
 
 export default function Auth({ onAuthSuccess }: AuthProps) {
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [mode, setMode] = useState<'login' | 'signup' | 'forgot-password'>('login');
+  const [resetEmailSent, setResetEmailSent] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -60,6 +61,30 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
       showWarning(ua.includes('brave'));
     }
   }, []);
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    if (!formData.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+      setAuthError('Please enter a valid email address.');
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(formData.email, {
+        redirectTo: `${window.location.origin}?reset=true`,
+      });
+      if (error) {
+        setAuthError(error.message);
+      } else {
+        setResetEmailSent(true);
+      }
+    } catch {
+      setAuthError('Something went wrong. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -282,39 +307,43 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
 
         {/* Auth Card */}
         <div className="bg-white rounded-2xl sm:rounded-3xl shadow-xl p-6 sm:p-8 border border-stone-100 animate-scale-in">
-          {/* Tabs */}
-          <div className="flex gap-2 mb-8 bg-stone-100 p-1 rounded-xl">
-            <button
-              onClick={() => setMode('login')}
-              className={`flex-1 py-2.5 rounded-lg font-semibold text-sm transition-all ${
-                mode === 'login'
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Sign In
-            </button>
-            <button
-              onClick={() => setMode('signup')}
-              className={`flex-1 py-2.5 rounded-lg font-semibold text-sm transition-all ${
-                mode === 'signup'
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Sign Up
-            </button>
-          </div>
+          {/* Tabs — hidden on forgot-password screen */}
+          {mode !== 'forgot-password' && (
+            <div className="flex gap-2 mb-8 bg-stone-100 p-1 rounded-xl">
+              <button
+                onClick={() => setMode('login')}
+                className={`flex-1 py-2.5 rounded-lg font-semibold text-sm transition-all ${
+                  mode === 'login'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Sign In
+              </button>
+              <button
+                onClick={() => setMode('signup')}
+                className={`flex-1 py-2.5 rounded-lg font-semibold text-sm transition-all ${
+                  mode === 'signup'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Sign Up
+              </button>
+            </div>
+          )}
 
           {/* Title */}
           <div className="mb-6">
             <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-2">
-              {mode === 'login' ? 'Welcome back' : 'Get started'}
+              {mode === 'login' ? 'Welcome back' : mode === 'signup' ? 'Get started' : 'Reset password'}
             </h1>
             <p className="text-slate-600 text-sm">
               {mode === 'login'
                 ? 'Sign in to continue your fitness journey'
-                : 'Create an account to start moving better'}
+                : mode === 'signup'
+                ? 'Create an account to start moving better'
+                : "Enter your email and we'll send you a reset link"}
             </p>
           </div>
 
@@ -444,6 +473,7 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
                 </label>
                 <button
                   type="button"
+                  onClick={() => { setMode('forgot-password'); setAuthError(''); setResetEmailSent(false); }}
                   className="text-orange-600 hover:text-orange-700 font-medium transition-colors"
                 >
                   Forgot password?
@@ -517,6 +547,65 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
                 Privacy Policy
               </button>
             </p>
+          )}
+
+          {/* Forgot Password Form */}
+          {mode === 'forgot-password' && (
+            <div className="mt-2">
+              {resetEmailSent ? (
+                <div className="text-center space-y-4">
+                  <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mx-auto">
+                    <Mail className="w-7 h-7 text-green-600" />
+                  </div>
+                  <p className="text-slate-700 text-sm">
+                    Reset link sent to <strong>{formData.email}</strong>. Check your inbox.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => { setMode('login'); setResetEmailSent(false); }}
+                    className="text-orange-600 hover:text-orange-700 font-medium text-sm transition-colors"
+                  >
+                    Back to Sign In
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleForgotPassword} className="space-y-4">
+                  <div>
+                    <label htmlFor="reset-email" className="block text-sm font-medium text-slate-700 mb-2">
+                      Email Address
+                    </label>
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                      <input
+                        id="reset-email"
+                        type="email"
+                        autoComplete="email"
+                        value={formData.email}
+                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                        placeholder="you@example.com"
+                        className="w-full pl-11 pr-4 py-3 rounded-xl border-2 border-stone-200 focus:border-orange-500 focus:ring-orange-500 focus:outline-none focus:ring-2 transition-all text-slate-900 placeholder:text-slate-400"
+                      />
+                    </div>
+                  </div>
+                  {authError && <p className="text-sm text-red-600">{authError}</p>}
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="touch-target w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 disabled:from-slate-400 disabled:to-slate-500 text-white font-bold py-3.5 rounded-xl transition-all active:scale-95 shadow-lg flex items-center justify-center gap-2"
+                  >
+                    {isSubmitting ? 'Sending...' : 'Send Reset Link'}
+                    <ArrowRight className="w-5 h-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setMode('login'); setAuthError(''); }}
+                    className="w-full text-center text-slate-600 hover:text-slate-900 font-medium text-sm transition-colors"
+                  >
+                    Back to Sign In
+                  </button>
+                </form>
+              )}
+            </div>
           )}
         </div>
       </div>
